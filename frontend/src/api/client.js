@@ -2,7 +2,6 @@ import axios from 'axios';
 
 const API_BASE_URL = 'https://onrender.com';
 
-
 const client = axios.create({ baseURL: API_BASE_URL });
 
 client.interceptors.request.use((config) => {
