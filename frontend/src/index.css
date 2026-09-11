@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+::selection {
+  background-color: #D4B366;
+  color: #1B2438;
+}
+
+/* visible keyboard focus everywhere */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid #B4903D;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.ledger-heading {
+  border-bottom: 2px solid #1B2438;
+  padding-bottom: 0.5rem;
+}
+
+table.register-table th {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5B6B7C;
+}

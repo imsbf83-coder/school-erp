@@ -1,0 +1,513 @@
+import { useEffect, useState } from 'react';
+import client from '../api/client';
+import PageHeader from '../components/PageHeader';
+
+function currentMonth() {
+  return new Date().toISOString().slice(0, 7); // "YYYY-MM"
+}
+
+const emptyPassengerForm = { name: '', guardianName: '', guardianPhone: '', pickupPoint: '', note: '' };
+
+// Must stay in step with DISCOUNT_REASONS in backend/src/routes/bus.js — the
+// API validates the value with .isIn(...) and rejects anything else.
+const DISCOUNT_REASONS = [
+  { value: 'SIBLING', label: 'Sibling also rides' },
+  { value: 'PREPAYMENT', label: 'Paid in advance' },
+  { value: 'ORPHAN', label: 'Orphan' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+function reasonLabel(value) {
+  return DISCOUNT_REASONS.find((r) => r.value === value)?.label || value;
+}
+
+// A discount can't take the fee below zero.
+function netPayable(grossFee, discount) {
+  return Math.max(0, Number(grossFee || 0) - Number(discount || 0));
+}
+
+export default function BusFees() {
+  const [routes, setRoutes] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [selectedRouteId, setSelectedRouteId] = useState('');
+  const [month, setMonth] = useState(currentMonth());
+  const [riders, setRiders] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [dues, setDues] = useState(null);
+  const [showRouteForm, setShowRouteForm] = useState(false);
+  const [showPassengerForm, setShowPassengerForm] = useState(false);
+  const [routeForm, setRouteForm] = useState({ name: '', monthlyFee: '', vehicleId: '' });
+  const [passengerForm, setPassengerForm] = useState(emptyPassengerForm);
+  const [paymentTarget, setPaymentTarget] = useState(null); // { riderType, riderId, name }
+  const [paymentForm, setPaymentForm] = useState({
+    grossFee: '',
+    discount: '',
+    discountReason: '',
+    amount: '',
+    paymentMethod: 'CASH',
+    remarks: '',
+  });
+  const [discountTarget, setDiscountTarget] = useState(null); // { riderType, riderId, name }
+  const [discountForm, setDiscountForm] = useState({ discount: '', discountReason: 'SIBLING' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadRoutes();
+    client.get('/bus/vehicles').then((res) => setVehicles(res.data));
+  }, []);
+
+  useEffect(() => {
+    if (selectedRouteId) loadRouteData();
+  }, [selectedRouteId, month]);
+
+  async function loadRoutes() {
+    setLoading(true);
+    try {
+      const { data } = await client.get('/bus/routes');
+      setRoutes(data);
+      if (data.length && !selectedRouteId) setSelectedRouteId(String(data[0].id));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadRouteData() {
+    const [ridersRes, paymentsRes, duesRes] = await Promise.all([
+      client.get('/bus/riders', { params: { busRouteId: selectedRouteId } }),
+      client.get('/bus/payments', { params: { busRouteId: selectedRouteId, month } }),
+      client.get('/bus/dues', { params: { busRouteId: selectedRouteId, month } }),
+    ]);
+    setRiders(ridersRes.data);
+    setPayments(paymentsRes.data);
+    setDues(duesRes.data);
+  }
+
+  async function handleCreateRoute(e) {
+    e.preventDefault();
+    await client.post('/bus/routes', routeForm);
+    setRouteForm({ name: '', monthlyFee: '', vehicleId: '' });
+    setShowRouteForm(false);
+    loadRoutes();
+  }
+
+  async function handleReassignVehicle(routeId, vehicleId) {
+    await client.post(`/bus/routes/${routeId}/vehicle`, { vehicleId: vehicleId || null });
+    loadRoutes();
+  }
+
+  async function handleAddPassenger(e) {
+    e.preventDefault();
+    await client.post('/bus/passengers', { ...passengerForm, busRouteId: selectedRouteId });
+    setPassengerForm(emptyPassengerForm);
+    setShowPassengerForm(false);
+    loadRouteData();
+  }
+
+  const selectedRoute = routes.find((r) => String(r.id) === String(selectedRouteId));
+
+  // The rider's standing discount pre-fills this month's payment — it isn't
+  // applied automatically, so the accountant can still override it for one
+  // month (or add a one-off pre-payment discount) without disturbing it.
+  function openPaymentForm(rider) {
+    const grossFee = rider.monthlyFee ?? selectedRoute?.monthlyFee ?? '';
+    const discount = rider.busFeeDiscount || '';
+    setDiscountTarget(null);
+    setError('');
+    setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name });
+    setPaymentForm({
+      grossFee,
+      discount,
+      discountReason: rider.busFeeDiscountReason || (discount ? 'SIBLING' : ''),
+      amount: netPayable(grossFee, discount),
+      paymentMethod: 'CASH',
+      remarks: '',
+    });
+  }
+
+  // Amount follows the discount so the common case needs no arithmetic, but
+  // stays editable afterwards for a partial payment.
+  function changePaymentDiscount(value) {
+    setPaymentForm((f) => ({ ...f, discount: value, amount: netPayable(f.grossFee, value) }));
+  }
+
+  function openDiscountForm(rider) {
+    setPaymentTarget(null);
+    setError('');
+    setDiscountTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name });
+    setDiscountForm({
+      discount: rider.busFeeDiscount || '',
+      discountReason: rider.busFeeDiscountReason || 'SIBLING',
+    });
+  }
+
+  async function handleRecordPayment(e) {
+    e.preventDefault();
+    setError('');
+    try {
+      await client.post('/bus/payments', {
+        ...paymentForm,
+        riderType: paymentTarget.riderType,
+        riderId: paymentTarget.riderId,
+        busRouteId: selectedRouteId,
+        month,
+      });
+      setPaymentTarget(null);
+      loadRouteData();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not record this payment.');
+    }
+  }
+
+  async function handleSetDiscount(e) {
+    e.preventDefault();
+    setError('');
+    try {
+      await client.post('/bus/riders/discount', {
+        riderType: discountTarget.riderType,
+        riderId: discountTarget.riderId,
+        discount: Number(discountForm.discount || 0),
+        discountReason: discountForm.discountReason,
+      });
+      setDiscountTarget(null);
+      loadRouteData();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not save this discount.');
+    }
+  }
+
+  // Build a quick lookup of who's paid this month, keyed by "TYPE-id"
+  const paidKeys = new Set(
+    payments.map((p) => (p.studentId ? `STUDENT-${p.studentId}` : `PASSENGER-${p.busPassengerId}`))
+  );
+
+  // Reported, not deducted: `amount` is already net of the discount, so the
+  // Paid figure and this one are independent readings of the same month.
+  const discountsGiven = payments.reduce((sum, p) => sum + (p.discount || 0), 0);
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Module 06"
+        title="Bus Fee Collection"
+        action={
+          <button onClick={() => setShowRouteForm((v) => !v)} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light">
+            {showRouteForm ? 'Cancel' : '+ New route'}
+          </button>
+        }
+      />
+
+      <p className="text-sm text-slate2 -mt-4 mb-6">
+        Covers both enrolled students on the bus and riders who aren't enrolled students —
+        e.g. junior-section children not yet admitted, or siblings who only use the bus.
+        Use "Add bus-only passenger" below for anyone not in the Students module.
+      </p>
+
+      {showRouteForm && (
+        <form onSubmit={handleCreateRoute} className="bg-white border border-ink/10 rounded-lg p-6 mb-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm text-slate2 mb-1">Route name</label>
+            <input required value={routeForm.name} onChange={(e) => setRouteForm({ ...routeForm, name: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" placeholder="Route 2 - North Side" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate2 mb-1">Monthly fee</label>
+            <input required type="number" value={routeForm.monthlyFee} onChange={(e) => setRouteForm({ ...routeForm, monthlyFee: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate2 mb-1">Vehicle (optional — can assign later)</label>
+            <select value={routeForm.vehicleId} onChange={(e) => setRouteForm({ ...routeForm, vehicleId: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white">
+              <option value="">No vehicle yet</option>
+              {vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicleNumber}{v.model ? ` — ${v.model}` : ''}</option>)}
+            </select>
+            <p className="text-xs text-slate2 mt-1">
+              Manage vehicles and their maintenance history on the <a href="/transport-expenses" className="text-brass-dark hover:underline">Transport Expenses</a> page.
+            </p>
+          </div>
+          <div className="sm:col-span-2">
+            <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Create route</button>
+          </div>
+        </form>
+      )}
+
+      {!loading && routes.length === 0 && (
+        <p className="text-slate2 text-sm">No bus routes yet. Create one to start assigning riders and collecting fees.</p>
+      )}
+
+      {routes.length > 0 && (
+        <>
+          <div className="flex flex-wrap gap-4 mb-6 items-end">
+            <div>
+              <label className="block text-sm text-slate2 mb-1">Route</label>
+              <select value={selectedRouteId} onChange={(e) => setSelectedRouteId(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white">
+                {routes.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r._count.students + r._count.passengers} riders)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-slate2 mb-1">Month</label>
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white" />
+            </div>
+            {selectedRoute && (
+              <div className="pb-2">
+                <p className="text-sm text-slate2 mb-1">
+                  Monthly fee: <span className="font-medium text-ink">Rs. {selectedRoute.monthlyFee}</span>
+                  {selectedRoute.vehicle?.driverName && <> · Driver: {selectedRoute.vehicle.driverName} {selectedRoute.vehicle.driverPhone && `(${selectedRoute.vehicle.driverPhone})`}</>}
+                </p>
+                <label className="text-xs text-slate2 mr-2">Vehicle:</label>
+                <select
+                  value={selectedRoute.vehicleId || ''}
+                  onChange={(e) => handleReassignVehicle(selectedRoute.id, e.target.value)}
+                  className="text-xs border border-ink/20 rounded-md px-2 py-1 bg-white"
+                >
+                  <option value="">Unassigned</option>
+                  {vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicleNumber}</option>)}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={() => setShowPassengerForm((v) => !v)}
+              className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white ml-auto"
+            >
+              {showPassengerForm ? 'Cancel' : '+ Add bus-only passenger'}
+            </button>
+          </div>
+
+          {showPassengerForm && (
+            <form onSubmit={handleAddPassenger} className="bg-white border border-ink/10 rounded-lg p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <p className="sm:col-span-2 text-sm text-slate2 -mt-1 mb-1">
+                For riders who are not in the Students module — e.g. a junior-section child too young to be admitted, or a sibling who only rides the bus.
+              </p>
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Name</label>
+                <input required value={passengerForm.name} onChange={(e) => setPassengerForm({ ...passengerForm, name: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Pickup point</label>
+                <input value={passengerForm.pickupPoint} onChange={(e) => setPassengerForm({ ...passengerForm, pickupPoint: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Guardian name</label>
+                <input required value={passengerForm.guardianName} onChange={(e) => setPassengerForm({ ...passengerForm, guardianName: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Guardian phone</label>
+                <input required value={passengerForm.guardianPhone} onChange={(e) => setPassengerForm({ ...passengerForm, guardianPhone: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-sm text-slate2 mb-1">Note (optional)</label>
+                <input placeholder="e.g. Junior section - not yet enrolled, sibling of STU-0002" value={passengerForm.note} onChange={(e) => setPassengerForm({ ...passengerForm, note: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div className="sm:col-span-2">
+                <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Add passenger</button>
+              </div>
+            </form>
+          )}
+
+          {dues && (
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="bg-white border border-ink/10 rounded-lg p-4">
+                <p className="font-display text-3xl text-present">{payments.length}</p>
+                <p className="text-sm text-slate2">Paid for {month}</p>
+              </div>
+              <div className="bg-white border border-ink/10 rounded-lg p-4">
+                <p className="font-display text-3xl text-absent">{dues.dues.length}</p>
+                <p className="text-sm text-slate2">Dues outstanding</p>
+                {dues.totalExpected > 0 && (
+                  <p className="text-xs text-slate2 mt-1">Rs. {dues.totalExpected} still expected</p>
+                )}
+              </div>
+              <div className="bg-white border border-ink/10 rounded-lg p-4">
+                <p className="font-display text-3xl text-brass-dark">Rs. {discountsGiven}</p>
+                <p className="text-sm text-slate2">Discounts given</p>
+              </div>
+            </div>
+          )}
+
+          {error && !paymentTarget && !discountTarget && <p className="text-absent text-sm mb-4">{error}</p>}
+
+          {paymentTarget && (
+            <form onSubmit={handleRecordPayment} className="bg-white border border-ink/10 rounded-lg p-6 mb-6">
+              <p className="text-sm text-slate2 mb-4">
+                Recording <span className="font-medium text-ink">{paymentTarget.name}</span>'s bus fee for {month}.
+              </p>
+              {error && <p className="text-absent text-sm mb-4">{error}</p>}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Route fee</label>
+                  <input
+                    readOnly
+                    value={paymentForm.grossFee}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2 bg-paper text-slate2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Discount</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={paymentForm.discount}
+                    onChange={(e) => changePaymentDiscount(e.target.value)}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Discount reason</label>
+                  <select
+                    value={paymentForm.discountReason}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, discountReason: e.target.value })}
+                    disabled={!Number(paymentForm.discount)}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white disabled:bg-paper disabled:text-slate2"
+                  >
+                    <option value="">None</option>
+                    {DISCOUNT_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">
+                    Amount received
+                    <span className="text-xs"> (net Rs. {netPayable(paymentForm.grossFee, paymentForm.discount)})</span>
+                  </label>
+                  <input required type="number" min="0" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Method</label>
+                  <select value={paymentForm.paymentMethod} onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white">
+                    <option value="CASH">Cash</option>
+                    <option value="BANK_TRANSFER">Bank Transfer</option>
+                    <option value="ONLINE">Online</option>
+                    <option value="CHEQUE">Cheque</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm text-slate2 mb-1">Remarks</label>
+                  <input value={paymentForm.remarks} onChange={(e) => setPaymentForm({ ...paymentForm, remarks: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+                </div>
+                <div className="flex gap-2 col-span-2 sm:col-span-1">
+                  <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Record payment</button>
+                  <button type="button" onClick={() => setPaymentTarget(null)} className="text-sm px-4 py-2 rounded-md border border-ink/20">Cancel</button>
+                </div>
+              </div>
+              <p className="text-xs text-slate2 mt-3">
+                The discount here applies to {month} only. Amount received follows the net figure but stays
+                editable for a partial payment.
+              </p>
+            </form>
+          )}
+
+          {discountTarget && (
+            <form onSubmit={handleSetDiscount} className="bg-white border border-ink/10 rounded-lg p-6 mb-6">
+              <p className="text-sm text-slate2 mb-4">
+                Standing discount for <span className="font-medium text-ink">{discountTarget.name}</span>.
+              </p>
+              {error && <p className="text-absent text-sm mb-4">{error}</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Discount per month</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={discountForm.discount}
+                    onChange={(e) => setDiscountForm({ ...discountForm, discount: e.target.value })}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Reason</label>
+                  <select
+                    value={discountForm.discountReason}
+                    onChange={(e) => setDiscountForm({ ...discountForm, discountReason: e.target.value })}
+                    disabled={!Number(discountForm.discount)}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white disabled:bg-paper disabled:text-slate2"
+                  >
+                    {DISCOUNT_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Save discount</button>
+                  <button type="button" onClick={() => setDiscountTarget(null)} className="text-sm px-4 py-2 rounded-md border border-ink/20">Cancel</button>
+                </div>
+              </div>
+              <p className="text-xs text-slate2 mt-3">
+                Applies every month from now on — set 0 to remove it. It pre-fills each payment rather than
+                being deducted automatically, and past receipts are untouched.
+              </p>
+            </form>
+          )}
+
+          <div className="bg-white border border-ink/10 rounded-lg overflow-hidden">
+            <table className="register-table w-full text-sm">
+              <thead>
+                <tr className="border-b border-ink/10 text-left">
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Class</th>
+                  <th className="px-4 py-3">Pickup Point</th>
+                  <th className="px-4 py-3">Discount</th>
+                  <th className="px-4 py-3">{month} Status</th>
+                  <th className="px-4 py-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {riders.length === 0 ? (
+                  <tr><td className="px-4 py-6 text-slate2" colSpan={7}>No riders on this route yet. Assign students from the Students page, or add a bus-only passenger above.</td></tr>
+                ) : (
+                  riders.map((r) => {
+                    const key = `${r.riderType}-${r.riderId}`;
+                    const paid = paidKeys.has(key);
+                    return (
+                      <tr key={key} className="border-b border-ink/5 last:border-0">
+                        <td className="px-4 py-3">{r.name}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${r.riderType === 'STUDENT' ? 'bg-ink/10 text-ink' : 'bg-brass/10 text-brass-dark'}`}>
+                            {r.riderType === 'STUDENT' ? 'Enrolled' : 'Bus only'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate2">{r.classLabel}</td>
+                        <td className="px-4 py-3 text-slate2">{r.pickupPoint || '—'}</td>
+                        <td className="px-4 py-3">
+                          {r.busFeeDiscount > 0 ? (
+                            <>
+                              <span className="text-brass-dark font-medium">Rs. {r.busFeeDiscount}</span>
+                              <span className="block text-xs text-slate2">
+                                {r.busFeeDiscountReason ? reasonLabel(r.busFeeDiscountReason) : 'No reason recorded'}
+                                {' · '}pays Rs. {r.netPayable}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-slate2">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {paid ? (
+                            <span className="text-xs px-2 py-1 rounded-full font-medium bg-present/10 text-present">Paid</span>
+                          ) : (
+                            <span className="text-xs px-2 py-1 rounded-full font-medium bg-absent/10 text-absent">Due</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {!paid && (
+                            <button onClick={() => openPaymentForm(r)} className="text-xs text-brass-dark hover:underline mr-3">
+                              Record payment
+                            </button>
+                          )}
+                          <button onClick={() => openDiscountForm(r)} className="text-xs text-slate2 hover:underline">
+                            {r.busFeeDiscount > 0 ? 'Edit discount' : 'Set discount'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

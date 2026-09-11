@@ -1,0 +1,10 @@
+-- This migration originally tried to CREATE TABLE "Holiday" a second time
+-- (in a newer column layout) right after 20260828090000_add_holidays had
+-- already created it in an older layout. That collided and never actually
+-- ran — it was manually marked as applied so development could continue.
+-- The real fix for the column layout is 20260829150000_add_staff_category
+-- (misnamed, but it's the migration that renames the old Holiday table
+-- aside, creates the new-shaped one, copies the data across, and drops the
+-- old one). This file is now an intentional no-op so a fresh, empty
+-- database can replay the full migration history without hitting the
+-- same collision.
