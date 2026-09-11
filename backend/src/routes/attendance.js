@@ -3,7 +3,12 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { getAllowedClassIds, isClassAllowed } = require('../utils/classAccess');
+const {
+  getAllowedClassIds,
+  getAllowedSections,
+  isClassAllowed,
+  isSectionAllowed,
+} = require('../utils/classAccess');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -12,6 +17,12 @@ router.use(requireAuth);
 // Returns attendance for every student in a class on a given date (marked or
 // not). An optional `section` narrows the list to one section of the class;
 // omit it to get the whole class.
+//
+// A TEACHER restricted to one section of this class (TeacherClass.section
+// set) can only ever see that section: if they explicitly ask for a
+// different section, that's a 403; if they ask for "whole class" (no
+// section param), the query is silently narrowed to their assigned section
+// instead of returning every section.
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -31,6 +42,21 @@ router.get(
         .json({ error: 'You do not have access to this class' });
     }
 
+    const allowedSections = await getAllowedSections(req.user);
+    let effectiveSection = section;
+
+    if (allowedSections !== null) {
+      const requiredSection = allowedSections.get(Number(classId));
+      if (requiredSection) {
+        if (section && !isSectionAllowed(allowedSections, classId, section)) {
+          return res
+            .status(403)
+            .json({ error: 'You do not have access to this section' });
+        }
+        effectiveSection = requiredSection;
+      }
+    }
+
     const dayStart = new Date(date);
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
@@ -39,7 +65,7 @@ router.get(
       where: {
         classId: Number(classId),
         status: 'REGULAR',
-        ...(section ? { section } : {}),
+        ...(effectiveSection ? { section: effectiveSection } : {}),
       },
       orderBy: { admissionNumber: 'asc' },
       include: {
@@ -120,9 +146,13 @@ router.post(
     }
 
     // --- Access check ---
+    // Restricted to allowed classes AND, within an allowed class, to the
+    // teacher's assigned section (if any) — this is what stops a teacher
+    // from marking attendance for a section they weren't given.
     const allowedClassIds = await getAllowedClassIds(req.user);
 
     if (allowedClassIds !== null) {
+      const allowedSections = await getAllowedSections(req.user);
       const studentIds = [
         ...new Set(flat.map((r) => r.studentId)),
       ];
@@ -136,11 +166,14 @@ router.post(
         select: {
           id: true,
           classId: true,
+          section: true,
         },
       });
 
       const disallowed = students.some(
-        (s) => !allowedClassIds.includes(s.classId)
+        (s) =>
+          !allowedClassIds.includes(s.classId) ||
+          !isSectionAllowed(allowedSections, s.classId, s.section)
       );
 
       const missing = students.length !== studentIds.length;
@@ -239,12 +272,16 @@ router.get(
         },
         select: {
           classId: true,
+          section: true,
         },
       });
 
+      const allowedSections = await getAllowedSections(req.user);
+
       if (
         !student ||
-        !allowedClassIds.includes(student.classId)
+        !allowedClassIds.includes(student.classId) ||
+        !isSectionAllowed(allowedSections, student.classId, student.section)
       ) {
         return res.status(403).json({
           error: 'You do not have access to this student',
@@ -397,6 +434,21 @@ router.get(
       });
     }
 
+    const allowedSections = await getAllowedSections(req.user);
+    let effectiveSection = section;
+
+    if (allowedSections !== null) {
+      const requiredSection = allowedSections.get(Number(classId));
+      if (requiredSection) {
+        if (section && !isSectionAllowed(allowedSections, classId, section)) {
+          return res.status(403).json({
+            error: 'You do not have access to this section',
+          });
+        }
+        effectiveSection = requiredSection;
+      }
+    }
+
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
@@ -430,7 +482,7 @@ router.get(
       where: {
         classId: Number(classId),
         status: 'REGULAR',
-        ...(section ? { section } : {}),
+        ...(effectiveSection ? { section: effectiveSection } : {}),
       },
       orderBy: {
         admissionNumber: 'asc',
@@ -491,7 +543,7 @@ router.get(
     res.json({
       from,
       to,
-      section: section || null,
+      section: effectiveSection || null,
       totalWorkingDays: workingDays.length,
       holidays: holidays.length,
       rows,

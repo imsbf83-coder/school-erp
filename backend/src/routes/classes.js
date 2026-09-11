@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { getAllowedClassIds } = require('../utils/classAccess');
+const { getAllowedClassIds, getAllowedSections } = require('../utils/classAccess');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -41,16 +41,34 @@ async function findByNormalizedName(name, excludeId) {
 }
 
 // GET /api/classes
+//
+// For a TEACHER who is restricted to a single section of a given class
+// (TeacherClass.section is set, not null), the `sections` field returned
+// here is narrowed down to just that one section instead of the class's
+// full "A,B,C" list. This is what makes the Attendance page's section
+// dropdown show only the teacher's own section — the frontend doesn't need
+// any special-casing, it just sees a shorter sections string.
+//
+// A teacher with no section restriction for that class (TeacherClass.section
+// is null, meaning "whole class") gets the full sections list back, same as
+// an unrestricted user.
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     const allowedClassIds = await getAllowedClassIds(req.user);
+    const allowedSections = await getAllowedSections(req.user);
     const classes = await prisma.class.findMany({
       where: allowedClassIds !== null ? { id: { in: allowedClassIds } } : {},
       include: { _count: { select: { students: true } } },
       orderBy: { name: 'asc' },
     });
-    res.json(classes);
+
+    const withSectionScope = classes.map((c) => {
+      const restrictedTo = allowedSections?.get(c.id);
+      return restrictedTo ? { ...c, sections: restrictedTo } : c;
+    });
+
+    res.json(withSectionScope);
   })
 );
 
