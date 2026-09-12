@@ -2,22 +2,34 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+// `moduleKey: null` means "always visible to any logged-in user" — matches
+// routes that only ever check requireAuth (no role/permission gate) today,
+// e.g. Classes/Students/Attendance, which are further scoped per-teacher
+// by classAccess.js rather than by module permission.
+//
+// `adminOnly: true` means visible to ADMIN alone, regardless of any
+// StaffPermission grant — used for screens that manage OTHER people's
+// access (Teacher Access) rather than doing day-to-day work in a module.
+//
+// Everything else names the MODULES key from backend/src/utils/permissions.js
+// that the corresponding route actually checks — see canSee() below for how
+// this combines with role.
 const modules = [
-  { to: '/', label: 'Dashboard', accent: '#1B2438' },
-  { to: '/classes', label: 'Classes', accent: '#4A6B8A' },
-  { to: '/students', label: 'Students', accent: '#2F7D5A' },
-  { to: '/attendance', label: 'Attendance', accent: '#B4903D' },
-  { to: '/exams', label: 'Examinations', accent: '#7A4FB5' },
-  { to: '/admissions', label: 'Admission / Withdrawal', accent: '#B23A48' },
-  { to: '/staff', label: 'Staff', accent: '#2E6E8E' },
-  { to: '/teacher-access', label: 'Teacher Access', accent: '#4F7A6B' },
-  { to: '/bus-fees', label: 'Bus Fee Collection', accent: '#C0632E' },
-  { to: '/transport-expenses', label: 'Transport Expenses', accent: '#8A5A2E' },
-  { to: '/reports', label: 'Reports', accent: '#5B6B7C' },
+  { to: '/', label: 'Dashboard', accent: '#1B2438', moduleKey: null },
+  { to: '/classes', label: 'Classes', accent: '#4A6B8A', moduleKey: null },
+  { to: '/students', label: 'Students', accent: '#2F7D5A', moduleKey: null },
+  { to: '/attendance', label: 'Attendance', accent: '#B4903D', moduleKey: null },
+  { to: '/exams', label: 'Examinations', accent: '#7A4FB5', moduleKey: 'EXAMS', teacherAlwaysSees: true },
+  { to: '/admissions', label: 'Admission / Withdrawal', accent: '#B23A48', moduleKey: 'ADMISSIONS' },
+  { to: '/staff', label: 'Staff', accent: '#2E6E8E', moduleKey: 'STAFF' },
+  { to: '/teacher-access', label: 'Teacher Access', accent: '#4F7A6B', adminOnly: true },
+  { to: '/bus-fees', label: 'Bus Fee Collection', accent: '#C0632E', moduleKey: 'BUS' },
+  { to: '/transport-expenses', label: 'Transport Expenses', accent: '#8A5A2E', moduleKey: 'BUS' },
+  { to: '/reports', label: 'Reports', accent: '#5B6B7C', moduleKey: null },
 ];
 
 export default function Layout({ children }) {
-  const { user, logout } = useAuth();
+  const { user, logout, hasModule } = useAuth();
   const navigate = useNavigate();
   // Sidebar is an off-canvas drawer on small screens (hidden by default,
   // slides in over the content when opened) and a normal always-visible
@@ -28,6 +40,23 @@ export default function Layout({ children }) {
   function closeSidebar() {
     setSidebarOpen(false);
   }
+
+  // Mirrors the actual backend rule for each module (see
+  // backend/src/routes/*.js) rather than just checking permissions in
+  // isolation — ADMIN sees everything; a module with `teacherAlwaysSees`
+  // (currently just Exams) is also always visible to TEACHER, matching
+  // exams.js's requireRoleOrPermission(['ADMIN','TEACHER'], MODULES.EXAMS);
+  // everyone else needs an explicit StaffPermission grant for that module.
+  function canSee(item) {
+    if (!user) return false;
+    if (user.role === 'ADMIN') return true;
+    if (item.adminOnly) return false;
+    if (item.moduleKey === null) return true; // no gate on the backend route
+    if (item.teacherAlwaysSees && user.role === 'TEACHER') return true;
+    return hasModule(item.moduleKey);
+  }
+
+  const visibleModules = modules.filter(canSee);
 
   return (
     <div className="min-h-screen flex bg-paper text-ink">
@@ -92,7 +121,7 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="flex-1 py-4 overflow-y-auto">
-          {modules.map((m) => (
+          {visibleModules.map((m) => (
             <NavLink
               key={m.to}
               to={m.to}

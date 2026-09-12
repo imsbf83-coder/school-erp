@@ -12,6 +12,8 @@ const examRoutes = require('./routes/exams');
 const gradeScaleRoutes = require('./routes/gradeScales');
 const staffRoutes = require('./routes/staff');
 const busRoutes = require('./routes/bus');
+const staffAccessRoutes = require('./routes/staffAccess');
+const meRoutes = require('./routes/me');
 
 const app = express();
 
@@ -34,6 +36,8 @@ app.use('/api/exams', examRoutes);
 app.use('/api/grade-scales', gradeScaleRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/bus', busRoutes);
+app.use('/api/staff-access', staffAccessRoutes);
+app.use('/api/me', meRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
