@@ -8,6 +8,7 @@ import Exams from './pages/Exams';
 import Admissions from './pages/Admissions';
 import Staff from './pages/Staff';
 import TeacherAccess from './pages/TeacherAccess';
+import StaffAccess from './pages/StaffAccess';
 import BusFees from './pages/BusFees';
 import TransportExpenses from './pages/TransportExpenses';
 import Reports from './pages/Reports';
@@ -21,12 +22,21 @@ export default function App() {
       <Route path="/classes" element={<ProtectedRoute roles={['ADMIN']}><Classes /></ProtectedRoute>} />
       <Route path="/students" element={<ProtectedRoute><Students /></ProtectedRoute>} />
       <Route path="/attendance" element={<ProtectedRoute><Attendance /></ProtectedRoute>} />
-      <Route path="/exams" element={<ProtectedRoute><Exams /></ProtectedRoute>} />
-      <Route path="/admissions" element={<ProtectedRoute><Admissions /></ProtectedRoute>} />
-      <Route path="/staff" element={<ProtectedRoute roles={['ADMIN']}><Staff /></ProtectedRoute>} />
+      {/* Matches backend/src/routes/exams.js: ADMIN and TEACHER always pass;
+          anyone else needs the EXAMS module (e.g. an Exam Incharge account). */}
+      <Route path="/exams" element={<ProtectedRoute roles={['ADMIN', 'TEACHER']} moduleKey="EXAMS"><Exams /></ProtectedRoute>} />
+      {/* Matches backend/src/routes/admissions.js: ADMIN always passes;
+          everyone else — including TEACHER — needs the ADMISSIONS module. */}
+      <Route path="/admissions" element={<ProtectedRoute roles={['ADMIN']} moduleKey="ADMISSIONS"><Admissions /></ProtectedRoute>} />
+      {/* Staff module was previously ADMIN-only; now also opens for anyone
+          granted the STAFF module (e.g. a Coordinator handling HR tasks). */}
+      <Route path="/staff" element={<ProtectedRoute roles={['ADMIN']} moduleKey="STAFF"><Staff /></ProtectedRoute>} />
       <Route path="/teacher-access" element={<ProtectedRoute roles={['ADMIN']}><TeacherAccess /></ProtectedRoute>} />
-      <Route path="/bus-fees" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']}><BusFees /></ProtectedRoute>} />
-      <Route path="/transport-expenses" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT']}><TransportExpenses /></ProtectedRoute>} />
+      {/* Staff Access manages OTHER people's permissions, so it stays
+          admin-only regardless of any module grant. */}
+      <Route path="/staff-access" element={<ProtectedRoute roles={['ADMIN']}><StaffAccess /></ProtectedRoute>} />
+      <Route path="/bus-fees" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusFees /></ProtectedRoute>} />
+      <Route path="/transport-expenses" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT']} moduleKey="BUS"><TransportExpenses /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     </Routes>
   );
