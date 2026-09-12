@@ -154,27 +154,42 @@ router.post(
     const { role, password } = req.body;
     const passwordHash = await bcrypt.hash(password, 10);
 
-    if (role === 'TEACHER') {
+    // Staff-linked creation: works for every role now (previously only
+    // TEACHER used this path). TEACHER logs in by phone, sourced from the
+    // staff record; every other role logs in by email, sourced from the
+    // staff record unless overridden by req.body.email.
+    if (req.body.staffId) {
       const staffId = Number(req.body.staffId);
-      if (!staffId) return res.status(400).json({ error: 'Choose a teacher from the staff list' });
-
       const staff = await prisma.staff.findUnique({ where: { id: staffId } });
       if (!staff) return res.status(404).json({ error: 'Staff member not found' });
       if (staff.userId) return res.status(409).json({ error: 'This staff member already has a login account' });
-      if (!staff.phone) {
-        return res.status(400).json({ error: 'This staff member has no mobile number on file — add one in Staff first' });
+
+      let identifierField;
+      let identifierValue;
+      if (role === 'TEACHER') {
+        identifierField = 'phone';
+        identifierValue = staff.phone;
+        if (!identifierValue) {
+          return res.status(400).json({ error: 'This staff member has no mobile number on file — add one in Staff first' });
+        }
+      } else {
+        identifierField = 'email';
+        identifierValue = req.body.email || staff.email;
+        if (!identifierValue) {
+          return res.status(400).json({ error: 'This staff member has no email on file — add one in Staff first, or provide one here' });
+        }
       }
 
-      const existingPhone = await prisma.user.findUnique({ where: { phone: staff.phone } });
-      if (existingPhone) return res.status(409).json({ error: 'A user with this mobile number already exists' });
+      const existingUser = await prisma.user.findUnique({ where: { [identifierField]: identifierValue } });
+      if (existingUser) return res.status(409).json({ error: `A user with this ${identifierField} already exists` });
 
       const user = await prisma.$transaction(async (tx) => {
         const created = await tx.user.create({
           data: {
             name: `${staff.firstName} ${staff.lastName}`,
-            phone: staff.phone,
+            [identifierField]: identifierValue,
             passwordHash,
-            role: 'TEACHER',
+            role,
           },
           select: { id: true, name: true, email: true, phone: true, role: true },
         });
@@ -185,7 +200,8 @@ router.post(
       return res.status(201).json(user);
     }
 
-    // Non-teacher roles: unchanged, name/email based.
+    // Fallback: original manual name/email flow, for a standalone account
+    // not linked to any Staff record (e.g. the initial admin seed).
     if (!req.body.name || !req.body.email) {
       return res.status(400).json({ error: 'name and email are required for this role' });
     }
