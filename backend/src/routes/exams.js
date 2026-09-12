@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getAllowedClassIds } = require('../utils/classAccess');
+const { MODULES, requireRoleOrPermission } = require('../utils/permissions');
 const {
   APPLIES_TO,
   SUBJECT_CATALOGUES,
@@ -20,6 +21,14 @@ const {
 
 const router = express.Router();
 router.use(requireAuth);
+// ADMIN and TEACHER pass through exactly as before — nothing changes for
+// them, and TEACHER's own class-scoped visibility (getAllowedClassIds,
+// used throughout this file) still applies underneath this. This line only
+// ADDS a new path in: an ACCOUNTANT/STAFF account (or a TEACHER account
+// with extra duties) that has been granted the EXAMS module via
+// StaffPermission now also gets through, instead of previously having no
+// access to this router at all.
+router.use(requireRoleOrPermission(['ADMIN', 'TEACHER'], MODULES.EXAMS));
 
 // Subjects are always read in the school's own order, not insert order.
 const subjectOrder = [{ sortOrder: 'asc' }, { id: 'asc' }];

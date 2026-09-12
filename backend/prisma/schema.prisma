@@ -48,6 +48,11 @@ model User {
   // Classes this user (role === TEACHER) has been given access to.
   // Empty for every other role — see utils/classAccess.js.
   teacherClasses TeacherClass[]
+
+  // Module-level access grants for this user (STAFF/ACCOUNTANT accounts,
+  // and optionally a TEACHER account with extra duties beyond their own
+  // classes) — see utils/permissions.js.
+  permissions StaffPermission[]
 }
 
 // Join table: which class(es) a TEACHER user is scoped to. A row here means
@@ -68,6 +73,33 @@ model TeacherClass {
 
   @@unique([userId, classId])
   @@index([classId])
+}
+
+// Grants a non-admin staff account (role STAFF or ACCOUNTANT — TEACHER
+// access is governed separately by TeacherClass/classAccess.js) access to
+// one module of the app. A user's full access is the UNION of every module
+// row they have here. There is no ADMIN row ever needed — requirePermission
+// in utils/permissions.js always lets role === 'ADMIN' through first,
+// before even checking this table.
+//
+// `module` is one of a fixed set of string constants (see
+// utils/permissions.js MODULES) — enforced at the API layer like every
+// other "fixed choice" string field in this schema, not a DB enum, for the
+// same SQLite-compatibility reason documented at the top of this file.
+//
+// Checked LIVE on every request (not baked into the JWT), so an admin
+// revoking or granting a module takes effect on that user's very next
+// request — no re-login required.
+model StaffPermission {
+  id     Int    @id @default(autoincrement())
+  userId Int
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module String // one of: STUDENTS, ATTENDANCE, EXAMS, ADMISSIONS, BUS, STAFF, CLASSES, GRADE_SCALES, HOLIDAYS
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, module])
+  @@index([userId])
 }
 
 // ---------- STUDENTS ----------

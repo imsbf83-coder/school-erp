@@ -54,6 +54,17 @@ export default function Attendance() {
 
   const sectionOptions = sectionsFor(classes, classId);
 
+  // If the class this user can see only has one section available to them
+  // (e.g. a teacher restricted to section "B" — the backend already
+  // narrows the `sections` list returned for /api/classes to just that one
+  // section), auto-select it instead of leaving the picker on "Whole
+  // class", which that teacher isn't actually allowed to view.
+  useEffect(() => {
+    if (sectionOptions.length === 1 && section !== sectionOptions[0]) {
+      setSection(sectionOptions[0]);
+    }
+  }, [sectionOptions.join(',')]);
+
   function changeClass(nextClassId) {
     setClassId(nextClassId);
     setSection('');
@@ -294,7 +305,14 @@ export default function Attendance() {
               onChange={(e) => setSection(e.target.value)}
               className="border border-ink/20 rounded-md px-3 py-2 bg-white"
             >
-              <option value="">Whole class</option>
+              {/* "Whole class" is only a real option when there's more than
+                  one section to choose from. A user restricted to exactly
+                  one section (sectionOptions.length === 1 — e.g. a teacher
+                  assigned only to section B) has no broader option, so
+                  showing "Whole class" here would be misleading and, if
+                  picked, would be silently narrowed back to their section
+                  by the backend anyway. */}
+              {sectionOptions.length > 1 && <option value="">Whole class</option>}
               {sectionOptions.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}

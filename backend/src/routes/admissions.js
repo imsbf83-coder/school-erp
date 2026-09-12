@@ -2,9 +2,17 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { requireAuth } = require('../middleware/auth');
+const { MODULES, requireRoleOrPermission } = require('../utils/permissions');
 
 const router = express.Router();
 router.use(requireAuth);
+// Previously this router had no role/permission check at all beyond being
+// logged in — any authenticated account (including every teacher) could
+// read and write admissions/withdrawals. This closes that gap: ADMIN
+// always has access; anyone else (STAFF, ACCOUNTANT, or a TEACHER account)
+// needs to be explicitly granted the ADMISSIONS module — e.g. the
+// Admission/Withdrawal Incharge.
+router.use(requireRoleOrPermission(['ADMIN'], MODULES.ADMISSIONS));
 
 // ---------- Helpers ----------
 

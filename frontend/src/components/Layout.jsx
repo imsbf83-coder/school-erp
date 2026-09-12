@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -18,24 +19,85 @@ const modules = [
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // Sidebar is an off-canvas drawer on small screens (hidden by default,
+  // slides in over the content when opened) and a normal always-visible
+  // column on md+ screens — see the `md:` classes below, which override
+  // the mobile transform/positioning entirely once there's room for it.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  function closeSidebar() {
+    setSidebarOpen(false);
+  }
 
   return (
     <div className="min-h-screen flex bg-paper text-ink">
-      {/* Sidebar styled as a ledger index with tab dividers */}
-      <aside className="w-64 bg-ink flex flex-col shrink-0">
-        <div className="px-6 py-6 border-b border-white/10">
-          <p className="font-display text-paper text-xl leading-tight">The Register</p>
-          <p className="font-mono text-[10px] text-white/40 uppercase tracking-widest mt-1">
-            School Management System
-          </p>
+      {/* Mobile top bar: only visible below md, gives access to the menu
+          toggle since the sidebar itself is off-canvas at that width. */}
+      <div className="md:hidden fixed top-0 inset-x-0 h-14 bg-ink flex items-center px-4 z-30">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open menu"
+          className="text-white p-2 -ml-2"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <p className="font-display text-paper text-lg ml-3">The Register</p>
+      </div>
+
+      {/* Backdrop: only rendered (and only clickable) while the mobile
+          drawer is open, so it doesn't sit above the page on desktop or
+          when closed. */}
+      {sidebarOpen && (
+        <div
+          onClick={closeSidebar}
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar styled as a ledger index with tab dividers.
+          Mobile (< md): fixed off-canvas drawer, slid in/out with a
+          transform based on sidebarOpen.
+          Desktop (md+): back to the original static, always-visible column
+          — the transform/fixed positioning is overridden by md:relative
+          and md:translate-x-0. */}
+      <aside
+        className={`w-64 bg-ink flex flex-col shrink-0 fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 md:relative md:transform-none ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="px-6 py-6 border-b border-white/10 flex items-center justify-between">
+          <div>
+            <p className="font-display text-paper text-xl leading-tight">The Register</p>
+            <p className="font-mono text-[10px] text-white/40 uppercase tracking-widest mt-1">
+              School Management System
+            </p>
+          </div>
+          {/* Close button: mobile only, since desktop never has this drawer
+              "open" in a way that needs closing. */}
+          <button
+            onClick={closeSidebar}
+            aria-label="Close menu"
+            className="md:hidden text-white/60 hover:text-white p-1"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
 
-        <nav className="flex-1 py-4">
+        <nav className="flex-1 py-4 overflow-y-auto">
           {modules.map((m) => (
             <NavLink
               key={m.to}
               to={m.to}
               end={m.to === '/'}
+              onClick={closeSidebar}
               className={({ isActive }) =>
                 `group flex items-center gap-0 relative pl-6 pr-4 py-3 text-sm transition-colors ${
                   isActive ? 'text-ink' : 'text-white/70 hover:text-white'
@@ -77,8 +139,10 @@ export default function Layout({ children }) {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-8 py-10">{children}</div>
+      {/* pt-14 on mobile makes room for the fixed top bar; md+ drops it
+          since the top bar itself is hidden there. */}
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-10">{children}</div>
       </main>
     </div>
   );
