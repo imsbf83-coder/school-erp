@@ -22,8 +22,6 @@ const modules = [
   { to: '/exams', label: 'Examinations', accent: '#7A4FB5', moduleKey: 'EXAMS', teacherAlwaysSees: true },
   { to: '/admissions', label: 'Admission / Withdrawal', accent: '#B23A48', moduleKey: 'ADMISSIONS' },
   { to: '/staff', label: 'Staff', accent: '#2E6E8E', moduleKey: 'STAFF' },
-  { to: '/teacher-access', label: 'Teacher Access', accent: '#4F7A6B', adminOnly: true },
-  { to: '/staff-access', label: 'Staff Access', accent: '#6B4F91', adminOnly: true },
   { to: '/bus-fees', label: 'Bus Fee Collection', accent: '#C0632E', moduleKey: 'BUS' },
   { to: '/transport-expenses', label: 'Transport Expenses', accent: '#8A5A2E', moduleKey: 'BUS' },
   { to: '/reports', label: 'Reports', accent: '#5B6B7C', moduleKey: null },

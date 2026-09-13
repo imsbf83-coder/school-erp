@@ -7,8 +7,6 @@ import Attendance from './pages/Attendance';
 import Exams from './pages/Exams';
 import Admissions from './pages/Admissions';
 import Staff from './pages/Staff';
-import TeacherAccess from './pages/TeacherAccess';
-import StaffAccess from './pages/StaffAccess';
 import BusFees from './pages/BusFees';
 import TransportExpenses from './pages/TransportExpenses';
 import Reports from './pages/Reports';
@@ -31,10 +29,6 @@ export default function App() {
       {/* Staff module was previously ADMIN-only; now also opens for anyone
           granted the STAFF module (e.g. a Coordinator handling HR tasks). */}
       <Route path="/staff" element={<ProtectedRoute roles={['ADMIN']} moduleKey="STAFF"><Staff /></ProtectedRoute>} />
-      <Route path="/teacher-access" element={<ProtectedRoute roles={['ADMIN']}><TeacherAccess /></ProtectedRoute>} />
-      {/* Staff Access manages OTHER people's permissions, so it stays
-          admin-only regardless of any module grant. */}
-      <Route path="/staff-access" element={<ProtectedRoute roles={['ADMIN']}><StaffAccess /></ProtectedRoute>} />
       <Route path="/bus-fees" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusFees /></ProtectedRoute>} />
       <Route path="/transport-expenses" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT']} moduleKey="BUS"><TransportExpenses /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
