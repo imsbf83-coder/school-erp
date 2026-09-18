@@ -3,12 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const {
-  getAllowedClassIds,
-  getAllowedSections,
-  isClassAllowed,
-  isSectionAllowed,
-} = require('../utils/classAccess');
+const { getAllowedClassIds, isClassAllowed } = require('../utils/classAccess');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -17,12 +12,6 @@ router.use(requireAuth);
 // Returns attendance for every student in a class on a given date (marked or
 // not). An optional `section` narrows the list to one section of the class;
 // omit it to get the whole class.
-//
-// A TEACHER restricted to one section of this class (TeacherClass.section
-// set) can only ever see that section: if they explicitly ask for a
-// different section, that's a 403; if they ask for "whole class" (no
-// section param), the query is silently narrowed to their assigned section
-// instead of returning every section.
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -42,21 +31,6 @@ router.get(
         .json({ error: 'You do not have access to this class' });
     }
 
-    const allowedSections = await getAllowedSections(req.user);
-    let effectiveSection = section;
-
-    if (allowedSections !== null) {
-      const requiredSection = allowedSections.get(Number(classId));
-      if (requiredSection) {
-        if (section && !isSectionAllowed(allowedSections, classId, section)) {
-          return res
-            .status(403)
-            .json({ error: 'You do not have access to this section' });
-        }
-        effectiveSection = requiredSection;
-      }
-    }
-
     const dayStart = new Date(date);
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
@@ -65,7 +39,7 @@ router.get(
       where: {
         classId: Number(classId),
         status: 'REGULAR',
-        ...(effectiveSection ? { section: effectiveSection } : {}),
+        ...(section ? { section } : {}),
       },
       orderBy: { admissionNumber: 'asc' },
       include: {
@@ -101,6 +75,11 @@ router.get(
 // When skipExisting is true, any (studentId, date) pair that already exists
 // is counted as "skipped" and left untouched. When false (or absent), the
 // old upsert behaviour applies — existing records are overwritten.
+// A record's `status` of 'CLEAR' (only meaningful when skipExisting is
+// false/absent) deletes that student's record for that date outright —
+// used by the attendance calendar editor when a cell is cycled back to
+// blank. This is different from omitting a record entirely, which this
+// endpoint always treats as "don't touch, not a real answer yet".
 router.post(
   '/bulk',
   requireRole('ADMIN', 'TEACHER', 'STAFF'),
@@ -146,13 +125,9 @@ router.post(
     }
 
     // --- Access check ---
-    // Restricted to allowed classes AND, within an allowed class, to the
-    // teacher's assigned section (if any) — this is what stops a teacher
-    // from marking attendance for a section they weren't given.
     const allowedClassIds = await getAllowedClassIds(req.user);
 
     if (allowedClassIds !== null) {
-      const allowedSections = await getAllowedSections(req.user);
       const studentIds = [
         ...new Set(flat.map((r) => r.studentId)),
       ];
@@ -166,14 +141,11 @@ router.post(
         select: {
           id: true,
           classId: true,
-          section: true,
         },
       });
 
       const disallowed = students.some(
-        (s) =>
-          !allowedClassIds.includes(s.classId) ||
-          !isSectionAllowed(allowedSections, s.classId, s.section)
+        (s) => !allowedClassIds.includes(s.classId)
       );
 
       const missing = students.length !== studentIds.length;
@@ -222,9 +194,16 @@ router.post(
         }
       }
     } else {
-      // --- Single-day import: upsert (overwrite existing) ---
-      const results = await prisma.$transaction(
-        flat.map((r) =>
+      // --- Single-day marking / calendar edit: upsert normal statuses.
+      // A status of 'CLEAR' is the calendar editor's explicit "this cell
+      // was cycled back to blank — delete the record" signal, distinct
+      // from an absent/undefined status elsewhere in this endpoint, which
+      // means "leave existing data alone".
+      const toUpsert = flat.filter((r) => r.status !== 'CLEAR');
+      const toClear = flat.filter((r) => r.status === 'CLEAR');
+
+      const results = await prisma.$transaction([
+        ...toUpsert.map((r) =>
           prisma.attendanceRecord.upsert({
             where: {
               studentId_date: {
@@ -245,8 +224,16 @@ router.post(
               markedById: req.user.id,
             },
           })
-        )
-      );
+        ),
+        ...toClear.map((r) =>
+          prisma.attendanceRecord.deleteMany({
+            where: {
+              studentId: r.studentId,
+              date: r.dateObj,
+            },
+          })
+        ),
+      ]);
 
       updated = results.length;
     }
@@ -272,16 +259,12 @@ router.get(
         },
         select: {
           classId: true,
-          section: true,
         },
       });
 
-      const allowedSections = await getAllowedSections(req.user);
-
       if (
         !student ||
-        !allowedClassIds.includes(student.classId) ||
-        !isSectionAllowed(allowedSections, student.classId, student.section)
+        !allowedClassIds.includes(student.classId)
       ) {
         return res.status(403).json({
           error: 'You do not have access to this student',
@@ -434,21 +417,6 @@ router.get(
       });
     }
 
-    const allowedSections = await getAllowedSections(req.user);
-    let effectiveSection = section;
-
-    if (allowedSections !== null) {
-      const requiredSection = allowedSections.get(Number(classId));
-      if (requiredSection) {
-        if (section && !isSectionAllowed(allowedSections, classId, section)) {
-          return res.status(403).json({
-            error: 'You do not have access to this section',
-          });
-        }
-        effectiveSection = requiredSection;
-      }
-    }
-
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
@@ -482,7 +450,7 @@ router.get(
       where: {
         classId: Number(classId),
         status: 'REGULAR',
-        ...(effectiveSection ? { section: effectiveSection } : {}),
+        ...(section ? { section } : {}),
       },
       orderBy: {
         admissionNumber: 'asc',
@@ -543,9 +511,103 @@ router.get(
     res.json({
       from,
       to,
-      section: effectiveSection || null,
+      section: section || null,
       totalWorkingDays: workingDays.length,
       holidays: holidays.length,
+      rows,
+    });
+  })
+);
+
+// GET /api/attendance/calendar?classId=&section=&from=&to=
+// Same class/period scoping as /report, but returns each student's
+// day-by-day status (not just the aggregated totals /report computes and
+// discards) so it can be rendered as an editable grid — one column per
+// working day, with existing marks fillable/changeable at any time.
+// Edits are saved through the existing POST /bulk (no new write endpoint
+// needed — it already accepts an arbitrary studentId+date+status per row).
+router.get(
+  '/calendar',
+  asyncHandler(async (req, res) => {
+    const { classId, section, from, to } = req.query;
+
+    if (!classId || !from || !to) {
+      return res.status(400).json({
+        error: 'classId, from, and to are required query params',
+      });
+    }
+
+    const allowedClassIds = await getAllowedClassIds(req.user);
+
+    if (!isClassAllowed(allowedClassIds, classId)) {
+      return res.status(403).json({
+        error: 'You do not have access to this class',
+      });
+    }
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+
+    const {
+      buildDayInfo,
+      fetchHolidays,
+      summarizeAttendance,
+    } = require('../utils/attendanceCalendar');
+
+    const holidays = await fetchHolidays(classId, fromDate, toDate);
+    const dayInfo = buildDayInfo(fromDate, toDate, holidays, new Date());
+    const workingDays = dayInfo.filter((d) => d.isWorkingDay);
+
+    const students = await prisma.student.findMany({
+      where: {
+        classId: Number(classId),
+        status: 'REGULAR',
+        ...(section ? { section } : {}),
+      },
+      orderBy: {
+        admissionNumber: 'asc',
+      },
+      include: {
+        attendance: {
+          where: {
+            date: {
+              gte: fromDate,
+              lte: toDate,
+            },
+          },
+        },
+      },
+    });
+
+    const rows = students.map((s) => {
+      const statusByDate = {};
+
+      s.attendance.forEach((a) => {
+        statusByDate[a.date.toISOString().slice(0, 10)] = a.status;
+      });
+
+      const summary = summarizeAttendance(
+        workingDays,
+        new Map(Object.entries(statusByDate))
+      );
+
+      return {
+        studentId: s.id,
+        admissionNumber: s.admissionNumber,
+        rollNumber: s.rollNumber,
+        name: `${s.firstName} ${s.lastName}`,
+        section: s.section,
+        statusByDate,
+        present: summary.present,
+        absent: summary.absent,
+        late: summary.late,
+        excused: summary.excused,
+        attendancePercent: summary.attendancePercent,
+      };
+    });
+
+    res.json({
+      dates: workingDays.map((d) => d.date),
       rows,
     });
   })
