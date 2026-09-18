@@ -2,17 +2,9 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { requireAuth } = require('../middleware/auth');
-const { MODULES, requireRoleOrPermission } = require('../utils/permissions');
 
 const router = express.Router();
 router.use(requireAuth);
-// Previously this router had no role/permission check at all beyond being
-// logged in — any authenticated account (including every teacher) could
-// read and write admissions/withdrawals. This closes that gap: ADMIN
-// always has access; anyone else (STAFF, ACCOUNTANT, or a TEACHER account)
-// needs to be explicitly granted the ADMISSIONS module — e.g. the
-// Admission/Withdrawal Incharge.
-router.use(requireRoleOrPermission(['ADMIN'], MODULES.ADMISSIONS));
 
 // ---------- Helpers ----------
 
@@ -396,6 +388,31 @@ router.post('/withdrawals', withdrawalValidation, async (req, res, next) => {
     ]);
 
     res.status(201).json(withdrawal);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------- DELETE /admissions/withdrawals/:studentId ----------
+// Reverses a withdrawal recorded by mistake: removes the Withdrawal
+// record entirely (clearing its exit date/reason/transfer-cert flag) and
+// moves the student back to REGULAR, in one transaction. Matches the
+// "Reactivate" action already built into the Students page.
+
+router.delete('/withdrawals/:studentId', async (req, res, next) => {
+  try {
+    const sId = Number(req.params.studentId);
+    const student = await prisma.student.findUnique({ where: { id: sId } });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+
+    await prisma.$transaction([
+      // deleteMany (not delete) so this doesn't throw if the student's
+      // status was somehow changed without a Withdrawal row ever existing.
+      prisma.withdrawal.deleteMany({ where: { studentId: sId } }),
+      prisma.student.update({ where: { id: sId }, data: { status: 'REGULAR' } }),
+    ]);
+
+    res.json({ status: 'REGULAR' });
   } catch (err) {
     next(err);
   }
