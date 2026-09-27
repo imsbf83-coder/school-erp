@@ -14,6 +14,7 @@ import { sectionsFor, sectionsForMany } from '../utils/sections';
 import { useAuth } from '../context/AuthContext';
 import GradeScaleEditor from './exams/GradeScaleEditor';
 import ImportMarks from './exams/ImportMarks';
+import AwardList from './exams/AwardList';
 
 const APPLIES_OPTIONS = [
   { value: 'ALL', label: 'Everyone' },
@@ -104,11 +105,14 @@ export default function Exams() {
 
       <div className="flex gap-2 mb-6">
         <TabButton active={tab === 'exams'} onClick={() => setTab('exams')} label="Exams" />
+        <TabButton active={tab === 'award'} onClick={() => setTab('award')} label="Award List" />
         <TabButton active={tab === 'scale'} onClick={() => setTab('scale')} label="Grading scale" />
       </div>
 
       {tab === 'exams' ? (
         <ExamsTab showForm={showForm} setShowForm={setShowForm} />
+      ) : tab === 'award' ? (
+        <AwardList />
       ) : (
         <GradeScaleEditor canEdit={user?.role === 'ADMIN'} />
       )}
