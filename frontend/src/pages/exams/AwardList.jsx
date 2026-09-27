@@ -25,6 +25,7 @@ function termLabel(term) {
 
 export default function AwardList() {
   const [exams, setExams] = useState([]);
+  const [classesFull, setClassesFull] = useState([]); // /classes list, for the real per-class sections (A,B,C)
   const [selectedExamId, setSelectedExamId] = useState('');
   const [examDetail, setExamDetail] = useState(null); // full /results payload for the selected exam
   const [classId, setClassId] = useState('');
@@ -36,6 +37,7 @@ export default function AwardList() {
   const [loadingRoster, setLoadingRoster] = useState(false);
 
   useEffect(() => {
+    client.get('/classes').then((res) => setClassesFull(res.data));
     client.get('/exams').then((res) => {
       setExams(res.data);
       if (res.data.length) setSelectedExamId(String(res.data[0].id));
@@ -90,7 +92,8 @@ export default function AwardList() {
   if (!examDetail) return <p className="text-slate2 text-sm">Loading exam…</p>;
 
   const selectedClass = examDetail.exam.classes.find((c) => String(c.classId) === classId);
-  const sectionOptions = selectedClass?.sections ? selectedClass.sections.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const fullClass = classesFull.find((c) => String(c.id) === classId);
+  const sectionOptions = fullClass?.sections ? fullClass.sections.split(',').map((s) => s.trim()).filter(Boolean) : [];
   const selectedSubject = examDetail.exam.subjects.find((s) => String(s.id) === subjectId);
 
   const className = selectedClass?.class?.name;
