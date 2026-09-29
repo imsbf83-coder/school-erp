@@ -97,20 +97,46 @@ export default function AwardList() {
   const selectedSubject = examDetail.exam.subjects.find((s) => String(s.id) === subjectId);
 
   const className = selectedClass?.class?.name;
-  const rows = examDetail.rows.filter(
-    (r) => r.className === className && (!section || r.section === section)
-  );
+  const rows = examDetail.rows.filter((r) => {
+    if (r.className !== className) return false;
+    if (section && r.section !== section) return false;
+    // A subject with appliesTo other than ALL (e.g. Islamiyat/Akhlaqiyat by
+    // religion, or Computer Science/Biology by studentGroup) only applies
+    // to some students — the backend already worked out exactly who, per
+    // subject, in row.subjects[].applicable. Filtering on that here is what
+    // makes picking "Islamiyat" print only Muslim students, "Akhlaqiyat"
+    // print only non-Muslim students, and likewise for the 9th/10th
+    // Computer vs Biology electives — no extra logic needed on this end.
+    if (!selectedSubject) return true;
+    const cell = r.subjects.find((c) => c.examSubjectId === selectedSubject.id);
+    return cell?.applicable !== false;
+  });
+
+  // Print is capped at TWO pages per class: page 1 is ALWAYS exactly 30
+  // students (never fewer, never redistributed), with anyone beyond that
+  // continuing on page 2 (repeats the column header; the Total/Appeared/
+  // Pass/Fail lines sit only at the bottom of the last page).
+  const ROWS_PER_PAGE = 30;
+  const pages =
+    rows.length <= ROWS_PER_PAGE
+      ? [rows]
+      : [rows.slice(0, ROWS_PER_PAGE), rows.slice(ROWS_PER_PAGE)];
 
   return (
     <div>
       <style>{`
+        @page { size: A4 portrait; margin: 10mm; }
         @media print {
           body * { visibility: hidden; }
           .award-list-print, .award-list-print * { visibility: visible; }
           .award-list-print { position: absolute; left: 0; top: 0; width: 100%; }
           .no-print { display: none !important; }
           .roll-print-cell { display: table-cell !important; }
-          .award-list-table th, .award-list-table td { border: 1px solid #333 !important; padding: 4px 6px !important; }
+          .award-list-table { font-size: 11px; }
+          .award-list-table th, .award-list-table td { border: 1px solid #333 !important; padding: 3px 5px !important; line-height: 1.25; }
+          .award-list-table tr { break-inside: avoid; }
+          .award-page { border: 0 !important; border-radius: 0 !important; }
+          .award-page-break { break-after: page; page-break-after: always; }
         }
         .roll-print-cell { display: none; }
       `}</style>
@@ -179,52 +205,62 @@ export default function AwardList() {
           </p>
         </div>
 
-        <div className="bg-white border border-ink/10 rounded-lg overflow-x-auto">
-          <table className="award-list-table register-table w-full text-sm">
-            <thead>
-              <tr className="border-b border-ink/10 text-left">
-                <th className="px-3 py-2">S #</th>
-                <th className="px-3 py-2">Admn #</th>
-                <th className="px-3 py-2">Exam Roll #</th>
-                <th className="px-3 py-2">Student Name</th>
-                <th className="px-3 py-2">Father Name</th>
-                <th className="px-3 py-2 text-center">Marks Obtd.</th>
-                <th className="px-3 py-2">Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loadingRoster ? (
-                <tr><td className="px-4 py-6 text-slate2" colSpan={7}>Loading roster…</td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td className="px-4 py-6 text-slate2" colSpan={7}>No students in this class/section.</td></tr>
-              ) : (
-                rows.map((row, i) => (
-                  <tr key={row.studentId} className="border-b border-ink/5 last:border-0">
-                    <td className="px-3 py-2">{i + 1}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{row.admissionNumber}</td>
-                    <td className="px-2 py-1 no-print">
-                      <RollInput studentId={row.studentId} value={rollNumbers[row.studentId] ?? ''} onSave={saveRollNumber} />
-                    </td>
-                    <td className="roll-print-cell px-3 py-2 font-mono text-xs">{rollNumbers[row.studentId] || ''}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{row.name}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{fatherNames[row.studentId] || ''}</td>
-                    <td className="px-3 py-2"></td>
-                    <td className="px-3 py-2"></td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        {loadingRoster ? (
+          <p className="text-slate2 text-sm">Loading roster…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-slate2 text-sm">No students in this class/section.</p>
+        ) : (
+          pages.map((pageRows, pageIdx) => {
+            const isLast = pageIdx === pages.length - 1;
+            const offset = pages.slice(0, pageIdx).reduce((n, p) => n + p.length, 0);
+            return (
+              <div key={pageIdx} className={isLast ? '' : 'award-page-break'}>
+                <div className="award-page bg-white border border-ink/10 rounded-lg overflow-x-auto">
+                  <table className="award-list-table register-table w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-ink/10 text-left">
+                        <th className="px-3 py-2">S #</th>
+                        <th className="px-3 py-2">Admn #</th>
+                        <th className="px-3 py-2">Exam Roll #</th>
+                        <th className="px-3 py-2">Student Name</th>
+                        <th className="px-3 py-2">Father Name</th>
+                        <th className="px-3 py-2 text-center">Marks Obtd.</th>
+                        <th className="px-3 py-2">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageRows.map((row, i) => (
+                        <tr key={row.studentId} className="border-b border-ink/5 last:border-0">
+                          <td className="px-3 py-2">{offset + i + 1}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{row.admissionNumber}</td>
+                          <td className="px-2 py-1 no-print">
+                            <RollInput studentId={row.studentId} value={rollNumbers[row.studentId] ?? ''} onSave={saveRollNumber} />
+                          </td>
+                          <td className="roll-print-cell px-3 py-2 font-mono text-xs">{rollNumbers[row.studentId] || ''}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{row.name}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{fatherNames[row.studentId] || ''}</td>
+                          <td className="px-3 py-2"></td>
+                          <td className="px-3 py-2"></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
-        <div className="mt-4 text-sm space-y-1">
-          <p>Students Total: <span className="inline-block min-w-[100px] border-b border-ink">&nbsp;</span></p>
-          <p>
-            Students Appeared: <span className="inline-block min-w-[80px] border-b border-ink">&nbsp;</span>
-            {'   '}Pass: <span className="inline-block min-w-[60px] border-b border-ink">&nbsp;</span>
-            {'   '}Fail: <span className="inline-block min-w-[60px] border-b border-ink">&nbsp;</span>
-          </p>
-        </div>
+                {isLast && (
+                  <div className="mt-4 text-sm space-y-1">
+                    <p>Students Total: <span className="inline-block min-w-[100px] border-b border-ink">&nbsp;</span></p>
+                    <p>
+                      Students Appeared: <span className="inline-block min-w-[80px] border-b border-ink">&nbsp;</span>
+                      {'   '}Pass: <span className="inline-block min-w-[60px] border-b border-ink">&nbsp;</span>
+                      {'   '}Fail: <span className="inline-block min-w-[60px] border-b border-ink">&nbsp;</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
