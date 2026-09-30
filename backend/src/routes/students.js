@@ -116,7 +116,13 @@ router.get('/', async (req, res, next) => {
     const [students, total] = await Promise.all([
       prisma.student.findMany({
         where,
-        include: { class: true },
+        include: {
+          class: true,
+          // So the list can show "Previously: STU-0042" / "Re-admitted as: STU-0099"
+          // without a follow-up request per row.
+          previousStudent: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
+          readmittedAs: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
+        },
         // Class, then section, then admission number — reads like the
         // school's own register instead of one global admission-number
         // order with every class interleaved together.
@@ -139,7 +145,13 @@ router.get('/:id', async (req, res, next) => {
   try {
     const student = await prisma.student.findUnique({
       where: { id: Number(req.params.id) },
-      include: { class: true, admission: true, withdrawal: true },
+      include: {
+        class: true,
+        admission: true,
+        withdrawal: true,
+        previousStudent: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
+        readmittedAs: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
+      },
     });
     if (!student) return res.status(404).json({ error: 'Student not found' });
     res.json(student);
@@ -365,6 +377,72 @@ router.put('/:id', updateStudentValidation, async (req, res, next) => {
       data,
     });
     res.json(student);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------- POST /students/:id/readmit ----------
+// A student who previously left (STRUCK_OFF / SLC / PASSOUT) rejoining the
+// school gets a BRAND NEW Student row with a new admission number — their
+// old row, and everything attached to it (attendance, exam results, the
+// old admission/withdrawal record), is left exactly as it was. The new row
+// is linked back to the old one via previousStudentId, so both records
+// stay traceable to each other without merging or overwriting any history.
+
+router.post('/:id/readmit', async (req, res, next) => {
+  try {
+    const oldId = Number(req.params.id);
+    const old = await prisma.student.findUnique({ where: { id: oldId } });
+    if (!old) return res.status(404).json({ error: 'Student not found' });
+    if (old.status === 'REGULAR') {
+      return res.status(400).json({
+        error: 'This student is already active. Re-admission is for a student who previously left (Struck Off, SLC, or Passout).',
+      });
+    }
+
+    const { admissionNumber, classId, section, rollNumber } = clean(req.body);
+    if (!admissionNumber || !classId) {
+      return res.status(400).json({ error: 'A new admission number and class are required.' });
+    }
+
+    const existingNumber = await prisma.student.findUnique({ where: { admissionNumber } });
+    if (existingNumber) {
+      return res.status(409).json({ error: `Admission number "${admissionNumber}" is already in use.` });
+    }
+
+    const cls = await prisma.class.findUnique({ where: { id: Number(classId) } });
+    if (!cls) return res.status(400).json({ error: 'That class does not exist.' });
+
+    const created = await prisma.student.create({
+      data: {
+        admissionNumber,
+        firstName: old.firstName,
+        lastName: old.lastName,
+        dateOfBirth: old.dateOfBirth,
+        gender: old.gender,
+        address: old.address,
+        phone: old.phone,
+        email: old.email,
+        guardianName: old.guardianName,
+        guardianPhone: old.guardianPhone,
+        guardianEmail: old.guardianEmail,
+        guardianRelation: old.guardianRelation,
+        fatherCnic: old.fatherCnic,
+        bFormNumber: old.bFormNumber,
+        religion: old.religion,
+        studentGroup: old.studentGroup,
+        orphanStatus: old.orphanStatus,
+        classId: cls.id,
+        section: section || null,
+        rollNumber: rollNumber || null,
+        status: 'REGULAR',
+        previousStudentId: old.id,
+      },
+      include: { class: true },
+    });
+
+    res.status(201).json(created);
   } catch (err) {
     next(err);
   }
