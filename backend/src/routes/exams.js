@@ -703,15 +703,40 @@ function normaliseName(value) {
 // alone — otherwise re-importing a partly-filled sheet would wipe marks.
 const ABSENT_TOKENS = ['AB', 'ABS', 'ABSENT', 'A', '-', '—', 'N/A'];
 
-// Finds the student a sheet row refers to. Admission No wins, otherwise it's
-// the name — Class and Section only come in to break a tie between two
-// students who share a name; an exam covering several classes (or several
-// sections of one) can easily have namesakes.
+// Finds the student a sheet row refers to. Admission No wins, then Roll
+// Number (the same "Exam Roll #" filled in on the Award List), otherwise
+// it's the name — Class and Section only come in to break a tie between
+// two students who share a name or roll number; an exam covering several
+// classes (or several sections of one) can easily have namesakes, and roll
+// numbers are only unique within a class, not school-wide.
 function matchStudent(row, students, indexes) {
   const admissionNo = String(row.admissionNo || '').trim();
   if (admissionNo) {
     const hit = students.find((s) => s.admissionNumber === admissionNo);
     return hit ? { student: hit } : { message: `No student with admission no. ${admissionNo} sits this exam.` };
+  }
+
+  const rollNumber = String(row.rollNumber || '').trim();
+  if (rollNumber) {
+    let hits = students.filter((s) => String(s.rollNumber || '').trim() === rollNumber);
+    if (hits.length > 1) {
+      const className = String(row.className || '').trim();
+      const section = String(row.section || '').trim().toUpperCase();
+      if (className) {
+        const grade = gradeNumberOf(className);
+        hits = hits.filter((s) => {
+          const studentClassName = s.class?.name;
+          if (grade !== null && gradeNumberOf(studentClassName) === grade) return true;
+          return normaliseName(studentClassName) === normaliseName(className);
+        });
+      }
+      if (hits.length > 1 && section) hits = hits.filter((s) => String(s.section || '').toUpperCase() === section);
+    }
+    if (hits.length === 1) return { student: hits[0] };
+    if (hits.length > 1) {
+      return { message: `Roll no. ${rollNumber} matches ${hits.length} students — add an Admission No, Class or Section column.` };
+    }
+    return { message: `No student with roll no. ${rollNumber} sits this exam.` };
   }
 
   const name = normaliseName(row.name);
@@ -737,7 +762,7 @@ function matchStudent(row, students, indexes) {
 }
 
 // POST /api/exams/:id/import-marks
-// Body: { section?, dryRun?, rows: [{ rowNumber, admissionNo?, className?, name?, section?, marks: { SUBJECT: value } }] }
+// Body: { section?, dryRun?, rows: [{ rowNumber, admissionNo?, rollNumber?, className?, name?, section?, marks: { SUBJECT: value } }] }
 //
 // Imports a whole sheet of marks in one request. Everything is validated
 // first and a sheet with any error writes nothing, so a typo in one row can't

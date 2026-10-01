@@ -17,6 +17,7 @@ import { parseCSV, exportRowsToCSV } from '../../utils/csv';
 // The four identity columns, and the header spellings accepted for each.
 const ID_COLUMNS = {
   admissionNo: ['admission no', 'admission no.', 'admission number', 'admissionno', 'admission#', 'adm no'],
+  rollNumber: ['roll no', 'roll no.', 'roll number', 'rollno', 'roll #', 'exam roll #', 'exam roll no', 'exam roll no.'],
   className: ['class', 'class name', 'classname', 'grade'],
   name: ['name', 'student name', 'student'],
   section: ['section', 'sec'],
@@ -37,6 +38,7 @@ function identityKeyFor(header) {
 function sheetColumns(subjectNames) {
   return [
     { key: 'admissionNo', label: 'Admission No' },
+    { key: 'rollNumber', label: 'Roll No' },
     { key: 'className', label: 'Class' },
     { key: 'name', label: 'Name' },
     { key: 'section', label: 'Section' },
@@ -67,7 +69,7 @@ export default function ImportMarks({ exam, rows, section, onImported }) {
   function downloadSample(catalogue) {
     const columns = sheetColumns(catalogue.subjects.map((s) => s.subjectName));
     const example = (name, className, sectionName) => {
-      const row = { admissionNo: '', className, name, section: sectionName };
+      const row = { admissionNo: '', rollNumber: '', className, name, section: sectionName };
       catalogue.subjects.forEach((s, idx) => {
         row[s.subjectName] = idx === 0 ? '58' : '';
       });
@@ -87,7 +89,7 @@ export default function ImportMarks({ exam, rows, section, onImported }) {
   function downloadFilled() {
     const columns = sheetColumns(subjectNames);
     const flat = rows.map((r) => {
-      const out = { admissionNo: r.admissionNumber || '', className: r.className || '', name: r.name, section: r.section || '' };
+      const out = { admissionNo: r.admissionNumber || '', rollNumber: r.rollNumber || '', className: r.className || '', name: r.name, section: r.section || '' };
       r.subjects.forEach((cell) => {
         // A subject the student doesn't sit is dashed out, so nobody fills it
         // in by mistake; an absent student's cell says ABS and stays that way.
@@ -206,8 +208,9 @@ export default function ImportMarks({ exam, rows, section, onImported }) {
       <input type="file" accept=".csv,text/csv" onChange={handleFile} className="text-sm mb-3 block" />
 
       <p className="text-xs text-slate2 mb-3">
-        One row per student, one column per subject. Students are matched on Admission No, then Name — Class and
-        Section only need filling in to tell two same-named students apart, and are otherwise ignored. A blank
+        One row per student, one column per subject. Students are matched on Admission No, then Roll No
+        (the same Exam Roll # filled in on the Award List), then Name — Class and
+        Section only need filling in to tell two same-named or same-roll-numbered students apart, and are otherwise ignored. A blank
         cell leaves the stored mark alone, and <span className="font-medium">ABS</span> (or a dash) marks the student
         absent for that subject. For Classes 9-10, whichever of C.SCI or BIO a student has a real mark in is taken
         as their elective choice and set on their record automatically — no need to set it on the Students page
