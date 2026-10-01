@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import client from '../api/client';
 import PageHeader from '../components/PageHeader';
 import CSVImportPanel from '../components/CSVImportPanel';
-import { sectionsForMany } from '../utils/sections';
+import { sectionsFor, sectionsForMany } from '../utils/sections';
 
 // These are the exact column headers the school's own records use.
 // The mapping below translates them to the internal field names the API
@@ -163,9 +163,79 @@ export default function Students() {
   const [withdrawalModal, setWithdrawalModal] = useState(null); // { studentId, studentName, status }
   const [withdrawalForm, setWithdrawalForm] = useState({ withdrawalDate: '', reason: '', transferCertIssued: false, remarks: '' });
 
-  // --- Individual class/section edit ---
+  // --- Individual class/section edit (quick action) ---
   const [editModal, setEditModal] = useState(null); // { studentId, studentName }
   const [editForm, setEditForm] = useState({ classId: '', section: '', rollNumber: '' });
+
+  // --- Full student edit (name, DOB, father details, etc.) ---
+  const [fullEditModal, setFullEditModal] = useState(null); // { studentId }
+  const [fullEditForm, setFullEditForm] = useState(null);
+
+  function openFullEditModal(s) {
+    setFullEditModal({ studentId: s.id });
+    setFullEditForm({
+      firstName: s.firstName || '',
+      lastName: s.lastName || '',
+      gender: s.gender || 'MALE',
+      dateOfBirth: s.dateOfBirth ? s.dateOfBirth.slice(0, 10) : '',
+      classId: s.classId || '',
+      section: s.section || '',
+      rollNumber: s.rollNumber || '',
+      guardianName: s.guardianName || '',
+      guardianPhone: s.guardianPhone || '',
+      fatherCnic: s.fatherCnic || '',
+      bFormNumber: s.bFormNumber || '',
+      religion: s.religion || '',
+      address: s.address || '',
+      studentGroup: s.studentGroup || '',
+      orphanStatus: s.orphanStatus || 'NONE',
+    });
+    setError('');
+  }
+
+  async function submitFullEdit(e) {
+    e.preventDefault();
+    if (!fullEditModal) return;
+    setSavingId(fullEditModal.studentId);
+    setError('');
+    try {
+      await client.put(`/students/${fullEditModal.studentId}`, fullEditForm);
+      setFullEditModal(null);
+      setFullEditForm(null);
+      loadStudents(filters);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not update this student.');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  // --- Re-admission: a student who left before, rejoining with a new
+  // admission number, linked back to their old record for history ---
+  const [readmitModal, setReadmitModal] = useState(null); // { studentId, studentName }
+  const [readmitForm, setReadmitForm] = useState({ admissionNumber: '', classId: '', section: '', rollNumber: '' });
+
+  function openReadmitModal(s) {
+    setReadmitModal({ studentId: s.id, studentName: `${s.firstName} ${s.lastName}` });
+    setReadmitForm({ admissionNumber: '', classId: s.classId || '', section: '', rollNumber: '' });
+    setError('');
+  }
+
+  async function submitReadmit(e) {
+    e.preventDefault();
+    if (!readmitModal) return;
+    setSavingId(readmitModal.studentId);
+    setError('');
+    try {
+      await client.post(`/students/${readmitModal.studentId}/readmit`, readmitForm);
+      setReadmitModal(null);
+      loadStudents(filters);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not re-admit this student.');
+    } finally {
+      setSavingId(null);
+    }
+  }
 
   function openEditModal(s) {
     setEditModal({ studentId: s.id, studentName: `${s.firstName} ${s.lastName}` });
@@ -616,7 +686,19 @@ export default function Students() {
                     <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} />
                   </td>
                   <td className="px-4 py-3 text-slate2">{idx + 1}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{s.admissionNumber}</td>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    {s.admissionNumber}
+                    {s.previousStudent && (
+                      <div className="text-slate2 font-sans normal-case mt-0.5">
+                        Previously: {s.previousStudent.admissionNumber}
+                      </div>
+                    )}
+                    {s.readmittedAs?.length > 0 && (
+                      <div className="text-slate2 font-sans normal-case mt-0.5">
+                        Re-admitted as: {s.readmittedAs.map((r) => r.admissionNumber).join(', ')}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{s.firstName} {s.lastName}</td>
                   <td className="px-4 py-3 text-slate2">{s.class?.name} {s.section}</td>
                   <td className="px-4 py-3 text-slate2">
@@ -664,12 +746,28 @@ export default function Students() {
                   </td>
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
                     <button
+                      onClick={() => openFullEditModal(s)}
+                      disabled={savingId === s.id}
+                      className="text-xs text-ink hover:underline disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
+                    <button
                       onClick={() => openEditModal(s)}
                       disabled={savingId === s.id}
                       className="text-xs text-ink hover:underline disabled:opacity-50"
                     >
                       Edit class
                     </button>
+                    {s.status !== 'REGULAR' && (
+                      <button
+                        onClick={() => openReadmitModal(s)}
+                        disabled={savingId === s.id}
+                        className="text-xs text-present hover:underline disabled:opacity-50"
+                      >
+                        Re-admit
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDelete(s.id, `${s.firstName} ${s.lastName}`)}
                       disabled={savingId === s.id}
@@ -796,6 +894,189 @@ export default function Students() {
                 className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90 disabled:opacity-50"
               >
                 Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {fullEditModal && fullEditForm && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <form
+            onSubmit={submitFullEdit}
+            className="bg-white border border-ink/10 rounded-lg p-6 w-full max-w-2xl my-8"
+          >
+            <h3 className="text-sm font-medium text-ink mb-4">Edit student details</h3>
+            {error && <p className="text-absent text-sm mb-4">{error}</p>}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="First name" value={fullEditForm.firstName} onChange={(v) => setFullEditForm({ ...fullEditForm, firstName: v })} required />
+              <Field label="Last name" value={fullEditForm.lastName} onChange={(v) => setFullEditForm({ ...fullEditForm, lastName: v })} required />
+
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Gender</label>
+                <select
+                  value={fullEditForm.gender}
+                  onChange={(e) => setFullEditForm({ ...fullEditForm, gender: e.target.value })}
+                  className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                >
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <Field label="Date of birth" type="date" value={fullEditForm.dateOfBirth} onChange={(v) => setFullEditForm({ ...fullEditForm, dateOfBirth: v })} />
+
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Class</label>
+                <select
+                  required
+                  value={fullEditForm.classId}
+                  onChange={(e) => setFullEditForm({ ...fullEditForm, classId: e.target.value, section: '' })}
+                  className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                >
+                  <option value="">Select class</option>
+                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              {sectionsFor(classes, fullEditForm.classId).length > 0 ? (
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Section</label>
+                  <select
+                    value={fullEditForm.section}
+                    onChange={(e) => setFullEditForm({ ...fullEditForm, section: e.target.value })}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                  >
+                    <option value="">— None —</option>
+                    {sectionsFor(classes, fullEditForm.classId).map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <Field label="Section" value={fullEditForm.section} onChange={(v) => setFullEditForm({ ...fullEditForm, section: v })} />
+              )}
+              <Field label="Roll number" value={fullEditForm.rollNumber} onChange={(v) => setFullEditForm({ ...fullEditForm, rollNumber: v })} />
+
+              <Field label="Father name" value={fullEditForm.guardianName} onChange={(v) => setFullEditForm({ ...fullEditForm, guardianName: v })} required />
+              <Field label="Father phone" value={fullEditForm.guardianPhone} onChange={(v) => setFullEditForm({ ...fullEditForm, guardianPhone: v })} />
+              <Field label="Father CNIC" value={fullEditForm.fatherCnic} onChange={(v) => setFullEditForm({ ...fullEditForm, fatherCnic: v })} />
+              <Field label="B-Form number" value={fullEditForm.bFormNumber} onChange={(v) => setFullEditForm({ ...fullEditForm, bFormNumber: v })} />
+              <Field label="Religion" value={fullEditForm.religion} onChange={(v) => setFullEditForm({ ...fullEditForm, religion: v })} />
+
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Group (9th/10th only)</label>
+                <select
+                  value={fullEditForm.studentGroup}
+                  onChange={(e) => setFullEditForm({ ...fullEditForm, studentGroup: e.target.value })}
+                  className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                >
+                  <option value="">— Not applicable —</option>
+                  <option value="COMPUTER">Computer Science</option>
+                  <option value="BIOLOGY">Biology</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Orphan status</label>
+                <select
+                  value={fullEditForm.orphanStatus}
+                  onChange={(e) => setFullEditForm({ ...fullEditForm, orphanStatus: e.target.value })}
+                  className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                >
+                  <option value="NONE">None</option>
+                  <option value="SINGLE">Single (one parent deceased)</option>
+                  <option value="DOUBLE">Double (both parents deceased)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <Field label="Address" value={fullEditForm.address} onChange={(v) => setFullEditForm({ ...fullEditForm, address: v })} />
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end mt-5">
+              <button
+                type="button"
+                onClick={() => { setFullEditModal(null); setFullEditForm(null); }}
+                className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingId === fullEditModal.studentId}
+                className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {savingId === fullEditModal.studentId ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {readmitModal && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+          <form
+            onSubmit={submitReadmit}
+            className="bg-white border border-ink/10 rounded-lg p-6 w-full max-w-md"
+          >
+            <h3 className="text-sm font-medium text-ink mb-1">Re-admit {readmitModal.studentName}</h3>
+            <p className="text-xs text-slate2 mb-4">
+              Creates a new student record with a new admission number, linked back to this student's
+              old record so their previous history stays intact and traceable.
+            </p>
+            {error && <p className="text-absent text-sm mb-4">{error}</p>}
+
+            <div className="grid grid-cols-1 gap-3 mb-4">
+              <Field
+                label="New admission number"
+                value={readmitForm.admissionNumber}
+                onChange={(v) => setReadmitForm({ ...readmitForm, admissionNumber: v })}
+                required
+              />
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Class</label>
+                <select
+                  required
+                  value={readmitForm.classId}
+                  onChange={(e) => setReadmitForm({ ...readmitForm, classId: e.target.value, section: '' })}
+                  className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                >
+                  <option value="">Select class</option>
+                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              {sectionsFor(classes, readmitForm.classId).length > 0 ? (
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Section</label>
+                  <select
+                    value={readmitForm.section}
+                    onChange={(e) => setReadmitForm({ ...readmitForm, section: e.target.value })}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white"
+                  >
+                    <option value="">— None —</option>
+                    {sectionsFor(classes, readmitForm.classId).map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <Field label="Section" value={readmitForm.section} onChange={(v) => setReadmitForm({ ...readmitForm, section: v })} />
+              )}
+              <Field label="Roll number" value={readmitForm.rollNumber} onChange={(v) => setReadmitForm({ ...readmitForm, rollNumber: v })} />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setReadmitModal(null)}
+                className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingId === readmitModal.studentId}
+                className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {savingId === readmitModal.studentId ? 'Saving…' : 'Re-admit'}
               </button>
             </div>
           </form>

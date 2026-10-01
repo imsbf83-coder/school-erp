@@ -160,6 +160,18 @@ model Student {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+// Set when this student's row was created via re-admission (a student
+  // who previously left — Struck Off / SLC / Passout — rejoining with a
+  // brand new admission number). Points at their OLD Student row, whose
+  // attendance/exam history stays exactly where it was — nothing is moved
+  // or merged, this is purely a traceable link between the two records.
+  previousStudentId Int?
+  previousStudent   Student?  @relation("Readmission", fields: [previousStudentId], references: [id])
+  // The reverse side: if THIS student was later re-admitted under a new
+  // admission number, this points at that new row. Empty unless that has
+  // happened.
+  readmittedAs      Student[] @relation("Readmission")
+
   // Set when this student's row was created via re-admission (a student
   // who previously left — Struck Off / SLC / Passout — rejoining with a
   // brand new admission number). Points at their OLD Student row, whose
