@@ -4,7 +4,7 @@ const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getAllowedClassIds } = require('../utils/classAccess');
-const { MODULES, requireRoleOrPermission } = require('../utils/permissions');
+const { MODULES, requireRoleOrPermission, getUserModules, hasModule } = require('../utils/permissions');
 const {
   APPLIES_TO,
   SUBJECT_CATALOGUES,
@@ -18,6 +18,21 @@ const {
   assignRanks,
   round2,
 } = require('../utils/examGrading');
+
+// A TEACHER normally only sees exams for classes they're assigned to
+// (via TeacherClass) — but a TEACHER who ALSO holds the EXAMS module
+// permission (e.g. an Exam Incharge who isn't a class teacher at all, or
+// has no classes assigned) should see the whole Examinations module
+// instead of being narrowed down to nothing. This wraps
+// getAllowedClassIds() with that one extra check; every exam route below
+// uses this instead of calling getAllowedClassIds() directly.
+async function getExamClassScope(user) {
+  const classIds = await getAllowedClassIds(user);
+  if (classIds === null) return null; // already unrestricted (ADMIN)
+  const userModules = await getUserModules(user);
+  if (hasModule(userModules, MODULES.EXAMS)) return null;
+  return classIds;
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -102,7 +117,7 @@ router.get(
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const allowedClassIds = await getAllowedClassIds(req.user);
+    const allowedClassIds = await getExamClassScope(req.user);
     const exams = await prisma.exam.findMany({
       where: allowedClassIds !== null ? { classes: { some: { classId: { in: allowedClassIds } } } } : {},
       include: { classes: { include: { class: true } }, subjects: { orderBy: subjectOrder } },
@@ -164,7 +179,7 @@ router.post(
     let uniqueClassIds = [...new Set(classIds.map((id) => Number(id)))];
 
     // A scoped TEACHER can only create an exam for their own class(es).
-    const allowedClassIds = await getAllowedClassIds(req.user);
+    const allowedClassIds = await getExamClassScope(req.user);
     if (allowedClassIds !== null) {
       const outsideAccess = uniqueClassIds.some((id) => !allowedClassIds.includes(id));
       if (outsideAccess) {
@@ -294,7 +309,7 @@ router.put(
 
     // A scoped TEACHER can only edit an exam that's (still) entirely within
     // their own class(es).
-    const allowedClassIds = await getAllowedClassIds(req.user);
+    const allowedClassIds = await getExamClassScope(req.user);
     if (allowedClassIds !== null) {
       const outsideAccess = exam.classes.some((ec) => !allowedClassIds.includes(ec.classId));
       if (outsideAccess) return res.status(403).json({ error: 'You do not have access to this exam' });
@@ -453,7 +468,7 @@ async function loadExamScope(req, { classIdParam } = {}) {
 
   // A scoped TEACHER only sees the result rows for their own class(es),
   // even when the exam spans other classes too.
-  const allowedClassIds = await getAllowedClassIds(req.user);
+  const allowedClassIds = await getExamClassScope(req.user);
   if (allowedClassIds !== null) {
     examClasses = examClasses.filter((ec) => allowedClassIds.includes(ec.classId));
     if (!examClasses.length) return { error: { status: 403, body: { error: 'You do not have access to this exam' } } };
@@ -963,7 +978,7 @@ router.post(
       select: { id: true, classId: true, firstName: true, lastName: true, religion: true, studentGroup: true, class: { select: { name: true } } },
     });
 
-    const allowedClassIds = await getAllowedClassIds(req.user);
+    const allowedClassIds = await getExamClassScope(req.user);
     if (allowedClassIds !== null) {
       if (!student || !allowedClassIds.includes(student.classId)) {
         return res.status(403).json({ error: 'You do not have access to this student' });
@@ -1033,7 +1048,7 @@ router.post(
       select: { id: true, classId: true, firstName: true, lastName: true, religion: true, studentGroup: true, class: { select: { name: true } } },
     });
 
-    const allowedClassIds = await getAllowedClassIds(req.user);
+    const allowedClassIds = await getExamClassScope(req.user);
     if (allowedClassIds !== null) {
       const disallowed = students.some((s) => !allowedClassIds.includes(s.classId));
       const missing = students.length !== studentIds.length;
