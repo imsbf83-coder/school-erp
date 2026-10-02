@@ -58,7 +58,7 @@ export default function Layout({ children }) {
   const visibleModules = modules.filter(canSee);
 
   return (
-    <div className="min-h-screen flex bg-paper text-ink">
+    <div className="h-screen overflow-hidden flex bg-paper text-ink">
       {/* Mobile top bar: only visible below md, gives access to the menu
           toggle since the sidebar itself is off-canvas at that width. */}
       <div className="md:hidden fixed top-0 inset-x-0 h-14 bg-ink flex items-center px-4 z-30">
