@@ -67,9 +67,11 @@ router.put(
     if (user.role === 'ADMIN') {
       return res.status(400).json({ error: 'Admin accounts already have full access; permissions do not apply to them.' });
     }
-    if (user.role === 'TEACHER') {
-      return res.status(400).json({ error: 'Teacher access is managed via Teacher Access (class/section), not module permissions.' });
-    }
+    // TEACHER accounts CAN hold module permissions — e.g. a teacher who is
+    // also the Exam Incharge gets EXAMS on top of their normal class-scoped
+    // access (see utils/permissions.js#getUserModules and exams.js's
+    // getExamClassScope, which lets an EXAMS-permission holder see the
+    // whole module instead of being limited to their assigned classes).
 
     await prisma.$transaction([
       prisma.staffPermission.deleteMany({ where: { userId } }),
