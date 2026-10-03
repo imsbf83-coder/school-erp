@@ -104,7 +104,7 @@ model StaffPermission {
 
 // ---------- STUDENTS ----------
 
-Model Student {
+model Student {
   id              Int      @id @default(autoincrement())
   admissionNumber String   @unique
   firstName       String
