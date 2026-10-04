@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getAllowedClassIds, getAllowedSections } = require('../utils/classAccess');
+const { MODULES, getUserModules, hasModule } = require('../utils/permissions');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -55,8 +56,24 @@ async function findByNormalizedName(name, excludeId) {
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const allowedClassIds = await getAllowedClassIds(req.user);
-    const allowedSections = await getAllowedSections(req.user);
+    let allowedClassIds = await getAllowedClassIds(req.user);
+    let allowedSections = await getAllowedSections(req.user);
+
+    // A TEACHER who ALSO holds the EXAMS or STUDENTS module permission
+    // (e.g. an Exam Incharge or Admission Incharge who isn't a class
+    // teacher at all) should see every class here, not just the ones
+    // they're personally assigned to via TeacherClass — otherwise someone
+    // with no classes of their own gets an empty list everywhere this
+    // endpoint feeds into (the Award List's section picker, Students page
+    // filters, etc.). Same override as exams.js#getExamClassScope.
+    if (allowedClassIds !== null) {
+      const userModules = await getUserModules(req.user);
+      if (hasModule(userModules, MODULES.EXAMS) || hasModule(userModules, MODULES.STUDENTS)) {
+        allowedClassIds = null;
+        allowedSections = null;
+      }
+    }
+
     const classes = await prisma.class.findMany({
       where: allowedClassIds !== null ? { id: { in: allowedClassIds } } : {},
       include: { _count: { select: { students: true } } },
