@@ -183,7 +183,6 @@ model Student {
   @@index([busRouteId])
 }
 
-
 model Class {
   id       Int     @id @default(autoincrement())
   name     String  @unique // e.g. "Grade 6"
@@ -410,7 +409,7 @@ model AttendanceRecord {
   studentId Int
   student   Student  @relation(fields: [studentId], references: [id])
   date      DateTime
-  // One of: PRESENT, ABSENT, LATE, EXCUSED
+  // One of: PRESENT, ABSENT, LATE, LEAVE
   status    String
   remarks   String?
 

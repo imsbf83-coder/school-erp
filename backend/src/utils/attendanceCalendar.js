@@ -187,18 +187,18 @@ function buildDayInfo(start, end, holidaysOrMap, today) {
 // PRESENT
 // ABSENT
 // LATE
-// EXCUSED
+// LEAVE
 //
 // Calculate attendance statistics.
 //
 // PRESENT and LATE count as attended.
-// EXCUSED is excluded from the percentage denominator.
+// LEAVE is excluded from the percentage denominator.
 // Unmarked days are also excluded from the percentage denominator.
 function summarizeAttendance(workingDays, statusByDate) {
   let present = 0;
   let absent = 0;
   let late = 0;
-  let excused = 0;
+  let leave = 0;
   let unmarked = 0;
 
   for (const day of workingDays) {
@@ -215,12 +215,12 @@ function summarizeAttendance(workingDays, statusByDate) {
       absent += 1;
     } else if (status === 'LATE') {
       late += 1;
-    } else if (status === 'EXCUSED') {
-      excused += 1;
+    } else if (status === 'LEAVE') {
+      leave += 1;
     }
   }
 
-  // EXCUSED and UNMARKED are excluded from the denominator.
+  // LEAVE and UNMARKED are excluded from the denominator.
   const countable = present + absent + late;
 
   const percent =
@@ -233,7 +233,7 @@ function summarizeAttendance(workingDays, statusByDate) {
     present,
     absent,
     late,
-    excused,
+    leave,
     unmarked,
     attendancePercent: percent,
   };
