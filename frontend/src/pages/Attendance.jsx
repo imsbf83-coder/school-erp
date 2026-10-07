@@ -3,6 +3,7 @@ import client from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { sectionsFor } from '../utils/sections';
 import ImportAttendance from './attendance/ImportAttendance';
+import AttendanceCalendar from './attendance/AttendanceCalendar';
 
 const STATUSES = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
 const STATUS_STYLES = {
@@ -30,6 +31,7 @@ export default function Attendance() {
 
   const [showHolidays, setShowHolidays] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showMonthlyView, setShowMonthlyView] = useState(false);
   const [holidays, setHolidays] = useState([]);
   const [holidaysYear, setHolidaysYear] = useState(() => new Date().getFullYear());
   const [holidayForm, setHolidayForm] = useState({ date: '', name: '' });
@@ -337,6 +339,9 @@ export default function Attendance() {
         <button onClick={() => setShowImport((v) => !v)} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
           {showImport ? 'Hide import' : 'Import attendance from a sheet'}
         </button>
+        <button onClick={() => setShowMonthlyView((v) => !v)} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+          {showMonthlyView ? 'Hide monthly view' : 'Monthly view'}
+        </button>
       </div>
 
       {showImport && (
@@ -360,70 +365,76 @@ export default function Attendance() {
         />
       )}
 
-      {(dateIsWeekend || dateIsHoliday) && (
-        <p className="text-sm text-late mb-4">
-          Heads up — {date} is {dateIsHoliday ? `marked as a holiday ("${dateIsHoliday.name}")` : 'a weekend'}, so it
-          won't count toward students' working days in the attendance % report even if you save records for it.
-        </p>
-      )}
+      {showMonthlyView ? (
+        <AttendanceCalendar classes={classes} />
+      ) : (
+        <>
+          {(dateIsWeekend || dateIsHoliday) && (
+            <p className="text-sm text-late mb-4">
+              Heads up — {date} is {dateIsHoliday ? `marked as a holiday ("${dateIsHoliday.name}")` : 'a weekend'}, so it
+              won't count toward students' working days in the attendance % report even if you save records for it.
+            </p>
+          )}
 
-      <div className="bg-white border border-ink/10 rounded-lg overflow-hidden mb-4">
-        <table className="register-table w-full text-sm">
-          <thead>
-            <tr className="border-b border-ink/10 text-left">
-              <th className="px-4 py-3">Roll</th>
-              <th className="px-4 py-3">Name</th>
-              {showSectionCol && <th className="px-4 py-3">Section</th>}
-              <th className="px-4 py-3">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>Loading…</td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>
-                {section
-                  ? `No active students in section ${section} of this class.`
-                  : 'No active students in this class.'}
-              </td></tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.studentId} className="border-b border-ink/5 last:border-0">
-                  <td className="px-4 py-3 font-mono text-xs">{r.rollNumber || '—'}</td>
-                  <td className="px-4 py-3">{r.name}</td>
-                  {showSectionCol && <td className="px-4 py-3 text-slate2">{r.section || '—'}</td>}
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1.5">
-                      {STATUSES.map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => setStatus(r.studentId, s)}
-                          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                            r.status === s ? STATUS_STYLES[s] + ' border-transparent' : 'border-ink/20 text-slate2 hover:bg-paper'
-                          }`}
-                        >
-                          {s.charAt(0) + s.slice(1).toLowerCase()}
-                        </button>
-                      ))}
-                    </div>
-                  </td>
+          <div className="bg-white border border-ink/10 rounded-lg overflow-hidden mb-4">
+            <table className="register-table w-full text-sm">
+              <thead>
+                <tr className="border-b border-ink/10 text-left">
+                  <th className="px-4 py-3">Roll</th>
+                  <th className="px-4 py-3">Name</th>
+                  {showSectionCol && <th className="px-4 py-3">Section</th>}
+                  <th className="px-4 py-3">Status</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>Loading…</td></tr>
+                ) : rows.length === 0 ? (
+                  <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>
+                    {section
+                      ? `No active students in section ${section} of this class.`
+                      : 'No active students in this class.'}
+                  </td></tr>
+                ) : (
+                  rows.map((r) => (
+                    <tr key={r.studentId} className="border-b border-ink/5 last:border-0">
+                      <td className="px-4 py-3 font-mono text-xs">{r.rollNumber || '—'}</td>
+                      <td className="px-4 py-3">{r.name}</td>
+                      {showSectionCol && <td className="px-4 py-3 text-slate2">{r.section || '—'}</td>}
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1.5">
+                          {STATUSES.map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => setStatus(r.studentId, s)}
+                              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                                r.status === s ? STATUS_STYLES[s] + ' border-transparent' : 'border-ink/20 text-slate2 hover:bg-paper'
+                              }`}
+                            >
+                              {s.charAt(0) + s.slice(1).toLowerCase()}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
-      <div className="flex items-center gap-4">
-        <button
-          onClick={handleSave}
-          disabled={saving || rows.length === 0}
-          className="text-sm px-5 py-2.5 rounded-md bg-ink text-paper hover:bg-ink-light disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save attendance'}
-        </button>
-        {savedMsg && <p className="text-present text-sm">{savedMsg}</p>}
-      </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleSave}
+              disabled={saving || rows.length === 0}
+              className="text-sm px-5 py-2.5 rounded-md bg-ink text-paper hover:bg-ink-light disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save attendance'}
+            </button>
+            {savedMsg && <p className="text-present text-sm">{savedMsg}</p>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

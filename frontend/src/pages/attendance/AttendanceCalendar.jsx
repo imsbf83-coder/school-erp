@@ -3,13 +3,13 @@ import client from '../../api/client';
 import { sectionsFor } from '../../utils/sections';
 
 // Click a cell to cycle through these, in order, back to blank (unmarked).
-const CYCLE = ['PRESENT', 'ABSENT', 'LATE', 'EXCUSED', null];
-const CELL_LABEL = { PRESENT: 'P', ABSENT: 'A', LATE: 'L', EXCUSED: 'E' };
+const CYCLE = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE', null];
+const CELL_LABEL = { PRESENT: 'P', ABSENT: 'A', LATE: 'L', LEAVE: 'E' };
 const CELL_STYLE = {
   PRESENT: 'bg-present/15 text-present',
   ABSENT: 'bg-absent/15 text-absent',
   LATE: 'bg-late/15 text-late',
-  EXCUSED: 'bg-slate2/15 text-slate2',
+  LEAVE: 'bg-slate2/15 text-slate2',
 };
 
 function formatDateHeader(iso) {
@@ -126,7 +126,7 @@ export default function AttendanceCalendar({ classes }) {
     <div>
       <p className="text-sm text-slate2 mb-4">
         A whole month at a glance, editable — click any cell to change that student's status for that
-        day, even long after it was first marked. Cycles Present → Absent → Late → Excused → blank.
+        day, even long after it was first marked. Cycles Present → Absent → Late → Leave → blank.
       </p>
 
       <div className="flex flex-wrap gap-4 mb-4 items-end">
