@@ -16,6 +16,7 @@ const REPORT_TABS = [
   { key: 'orphan', label: 'Orphan Children' },
   { key: 'exit', label: 'Struck Off / SLC / Passout' },
   { key: 'attendance', label: 'Attendance %' },
+  { key: 'attendanceSummary', label: 'Daily / Monthly Attendance Summary' },
   { key: 'broadsheet', label: 'Exam Broad Sheet' },
   { key: 'reportCard', label: 'Report Cards' },
   { key: 'subjectStats', label: 'Subject Pass % / GPA' },
@@ -78,6 +79,7 @@ export default function Reports() {
         {tab === 'orphan' && <OrphanReport classes={classes} />}
         {tab === 'exit' && <ExitStatusReport />}
         {tab === 'attendance' && <AttendanceReport classes={classes} />}
+        {tab === 'attendanceSummary' && <AttendanceSummaryReport />}
         {tab === 'broadsheet' && <ExamBroadSheet classes={classes} />}
         {tab === 'reportCard' && <ReportCard />}
         {tab === 'subjectStats' && <SubjectStats classes={classes} />}
@@ -1026,7 +1028,7 @@ function AttendanceReport({ classes }) {
         { key: 'section', label: 'Section' },
         { key: 'present', label: 'Present' },
         { key: 'late', label: 'Late' },
-        { key: 'excused', label: 'Excused' },
+        { key: 'leave', label: 'Leave' },
         { key: 'absent', label: 'Absent' },
         { key: 'totalWorkingDays', label: 'Working Days' },
         { key: 'percentage', label: 'Attendance %' },
@@ -1123,7 +1125,7 @@ function AttendanceReport({ classes }) {
               <th className="px-4 py-3">Section</th>
               <th className="px-4 py-3">Present</th>
               <th className="px-4 py-3">Late</th>
-              <th className="px-4 py-3">Excused</th>
+              <th className="px-4 py-3">Leave</th>
               <th className="px-4 py-3">Absent</th>
               <th className="px-4 py-3">Working Days</th>
               <th className="px-4 py-3">Attendance %</th>
@@ -1144,7 +1146,7 @@ function AttendanceReport({ classes }) {
                   <td className="px-4 py-3 text-slate2">{r.section || '—'}</td>
                   <td className="px-4 py-3">{r.present}</td>
                   <td className="px-4 py-3">{r.late}</td>
-                  <td className="px-4 py-3">{r.excused}</td>
+                  <td className="px-4 py-3">{r.leave}</td>
                   <td className="px-4 py-3">{r.absent}</td>
                   <td className="px-4 py-3 text-slate2">{r.totalWorkingDays}</td>
                   <td className="px-4 py-3">
@@ -1154,6 +1156,148 @@ function AttendanceReport({ classes }) {
                   </td>
                 </tr>
               ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---- Daily / Monthly Attendance Summary — one row per class+section:
+// Total Students, Present, On Leave, Absent. Daily is a single day's
+// snapshot; Monthly sums the same counts across every working day in that
+// month (so the Present/Leave/Absent figures can add up to more than Total
+// Students — they're counts of markings across the month, not a headcount).
+function AttendanceSummaryReport() {
+  const [mode, setMode] = useState('daily'); // 'daily' | 'monthly'
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, date, month]);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const params = mode === 'daily' ? { date } : { month };
+      const { data } = await client.get('/attendance/classwise-summary', { params });
+      setRows(data.rows);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleExport() {
+    exportRowsToCSV(
+      `attendance-summary-${mode === 'daily' ? date : month}.csv`,
+      [
+        { key: 'className', label: 'Class' },
+        { key: 'section', label: 'Section' },
+        { key: 'totalStudents', label: 'Total Students' },
+        { key: 'present', label: 'Present' },
+        { key: 'leave', label: 'On Leave' },
+        { key: 'absent', label: 'Absent' },
+      ],
+      rows.map((r) => ({ ...r, section: r.section || '—' }))
+    );
+  }
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      totalStudents: acc.totalStudents + r.totalStudents,
+      present: acc.present + r.present,
+      leave: acc.leave + r.leave,
+      absent: acc.absent + r.absent,
+    }),
+    { totalStudents: 0, present: 0, leave: 0, absent: 0 }
+  );
+
+  return (
+    <div>
+      <ReportTitle>Daily / Monthly Attendance Summary</ReportTitle>
+
+      <div className="flex flex-wrap gap-4 mb-4 items-end print:hidden">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setMode('daily')}
+            className={`text-sm px-4 py-2 rounded-md border ${mode === 'daily' ? 'bg-ink text-paper border-ink' : 'border-ink/20 hover:bg-white'}`}
+          >
+            Daily
+          </button>
+          <button
+            onClick={() => setMode('monthly')}
+            className={`text-sm px-4 py-2 rounded-md border ${mode === 'monthly' ? 'bg-ink text-paper border-ink' : 'border-ink/20 hover:bg-white'}`}
+          >
+            Monthly
+          </button>
+        </div>
+        {mode === 'daily' ? (
+          <div>
+            <label className="block text-sm text-slate2 mb-1">Date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border border-ink/20 rounded-md px-3 py-2 bg-white"
+            />
+          </div>
+        ) : (
+          <div>
+            <label className="block text-sm text-slate2 mb-1">Month</label>
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="border border-ink/20 rounded-md px-3 py-2 bg-white"
+            />
+          </div>
+        )}
+      </div>
+
+      <ReportToolbar onExportCSV={handleExport} count={rows.length} noun="class/section" />
+
+      <div className="bg-white border border-ink/10 rounded-lg overflow-x-auto">
+        <table className="register-table w-full text-sm">
+          <thead>
+            <tr className="border-b border-ink/10 text-left">
+              <th className="px-4 py-3">Class</th>
+              <th className="px-4 py-3">Section</th>
+              <th className="px-4 py-3">Total Students</th>
+              <th className="px-4 py-3">Present</th>
+              <th className="px-4 py-3">On Leave</th>
+              <th className="px-4 py-3">Absent</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td className="px-4 py-6 text-slate2" colSpan={6}>Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td className="px-4 py-6 text-slate2" colSpan={6}>No data for this {mode === 'daily' ? 'date' : 'month'}.</td></tr>
+            ) : (
+              <>
+                {rows.map((r, idx) => (
+                  <tr key={idx} className="border-b border-ink/5 last:border-0">
+                    <td className="px-4 py-3 font-medium">{r.className}</td>
+                    <td className="px-4 py-3 text-slate2">{r.section || '—'}</td>
+                    <td className="px-4 py-3">{r.totalStudents}</td>
+                    <td className="px-4 py-3">{r.present}</td>
+                    <td className="px-4 py-3">{r.leave}</td>
+                    <td className="px-4 py-3">{r.absent}</td>
+                  </tr>
+                ))}
+                <tr className="bg-paper font-medium">
+                  <td className="px-4 py-3" colSpan={2}>Total</td>
+                  <td className="px-4 py-3">{totals.totalStudents}</td>
+                  <td className="px-4 py-3">{totals.present}</td>
+                  <td className="px-4 py-3">{totals.leave}</td>
+                  <td className="px-4 py-3">{totals.absent}</td>
+                </tr>
+              </>
             )}
           </tbody>
         </table>

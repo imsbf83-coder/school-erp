@@ -3,14 +3,13 @@ import client from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { sectionsFor } from '../utils/sections';
 import ImportAttendance from './attendance/ImportAttendance';
-import AttendanceCalendar from './attendance/AttendanceCalendar';
 
-const STATUSES = ['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'];
+const STATUSES = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
 const STATUS_STYLES = {
   PRESENT: 'bg-present text-white',
   ABSENT: 'bg-absent text-white',
   LATE: 'bg-late text-white',
-  EXCUSED: 'bg-slate2 text-white',
+  LEAVE: 'bg-slate2 text-white',
 };
 
 function isWeekend(iso) {
@@ -20,7 +19,6 @@ function isWeekend(iso) {
 }
 
 export default function Attendance() {
-  const [tab, setTab] = useState('mark'); // 'mark' | 'calendar'
   const [classes, setClasses] = useState([]);
   const [classId, setClassId] = useState('');
   const [section, setSection] = useState('');
@@ -55,6 +53,17 @@ export default function Attendance() {
   }, [showHolidays, holidaysYear]);
 
   const sectionOptions = sectionsFor(classes, classId);
+
+  // If the class this user can see only has one section available to them
+  // (e.g. a teacher restricted to section "B" — the backend already
+  // narrows the `sections` list returned for /api/classes to just that one
+  // section), auto-select it instead of leaving the picker on "Whole
+  // class", which that teacher isn't actually allowed to view.
+  useEffect(() => {
+    if (sectionOptions.length === 1 && section !== sectionOptions[0]) {
+      setSection(sectionOptions[0]);
+    }
+  }, [sectionOptions.join(',')]);
 
   function changeClass(nextClassId) {
     setClassId(nextClassId);
@@ -143,7 +152,7 @@ export default function Attendance() {
   const importMonth = Number(date.slice(5, 7));
 
   const showSectionCol = !section && sectionOptions.length > 0;
-  const colCount = showSectionCol ? 6 : 5;
+  const colCount = showSectionCol ? 4 : 3;
 
   return (
     <div>
@@ -160,27 +169,6 @@ export default function Attendance() {
         }
       />
 
-      <div className="flex gap-2 mb-6">
-        <button
-          onClick={() => setTab('mark')}
-          className={`text-sm px-4 py-2 rounded-full border transition-colors ${
-            tab === 'mark' ? 'bg-ink text-paper border-ink' : 'border-ink/20 text-slate2 hover:bg-white'
-          }`}
-        >
-          Mark attendance
-        </button>
-        <button
-          onClick={() => setTab('calendar')}
-          className={`text-sm px-4 py-2 rounded-full border transition-colors ${
-            tab === 'calendar' ? 'bg-ink text-paper border-ink' : 'border-ink/20 text-slate2 hover:bg-white'
-          }`}
-        >
-          Attendance calendar (edit past dates)
-        </button>
-      </div>
-
-      {tab === 'mark' && (
-        <>
       {showHolidays && (
         <div className="bg-white border border-ink/10 rounded-lg p-6 mb-8">
           <p className="text-sm text-slate2 mb-4">
@@ -317,7 +305,14 @@ export default function Attendance() {
               onChange={(e) => setSection(e.target.value)}
               className="border border-ink/20 rounded-md px-3 py-2 bg-white"
             >
-              <option value="">Whole class</option>
+              {/* "Whole class" is only a real option when there's more than
+                  one section to choose from. A user restricted to exactly
+                  one section (sectionOptions.length === 1 — e.g. a teacher
+                  assigned only to section B) has no broader option, so
+                  showing "Whole class" here would be misleading and, if
+                  picked, would be silently narrowed back to their section
+                  by the backend anyway. */}
+              {sectionOptions.length > 1 && <option value="">Whole class</option>}
               {sectionOptions.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
@@ -376,8 +371,6 @@ export default function Attendance() {
         <table className="register-table w-full text-sm">
           <thead>
             <tr className="border-b border-ink/10 text-left">
-              <th className="px-4 py-3">Sr.</th>
-              <th className="px-4 py-3">Admission No.</th>
               <th className="px-4 py-3">Roll</th>
               <th className="px-4 py-3">Name</th>
               {showSectionCol && <th className="px-4 py-3">Section</th>}
@@ -394,10 +387,8 @@ export default function Attendance() {
                   : 'No active students in this class.'}
               </td></tr>
             ) : (
-              rows.map((r, i) => (
+              rows.map((r) => (
                 <tr key={r.studentId} className="border-b border-ink/5 last:border-0">
-                  <td className="px-4 py-3 text-slate2">{i + 1}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{r.admissionNumber}</td>
                   <td className="px-4 py-3 font-mono text-xs">{r.rollNumber || '—'}</td>
                   <td className="px-4 py-3">{r.name}</td>
                   {showSectionCol && <td className="px-4 py-3 text-slate2">{r.section || '—'}</td>}
@@ -433,10 +424,6 @@ export default function Attendance() {
         </button>
         {savedMsg && <p className="text-present text-sm">{savedMsg}</p>}
       </div>
-        </>
-      )}
-
-      {tab === 'calendar' && <AttendanceCalendar classes={classes} />}
     </div>
   );
 }
