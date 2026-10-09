@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import client from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useAuth } from '../context/AuthContext';
 
 function currentMonth() {
   return new Date().toISOString().slice(0, 7);
@@ -28,6 +29,11 @@ const emptyExpenseForm = {
 const emptyVehicleForm = { vehicleNumber: '', model: '', capacity: '', driverName: '', driverPhone: '' };
 
 export default function TransportExpenses() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  // null = adding a new record; a number = editing that existing one.
+  const [editingVehicleId, setEditingVehicleId] = useState(null);
+  const [editingExpenseId, setEditingExpenseId] = useState(null);
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [month, setMonth] = useState(currentMonth());
@@ -77,13 +83,51 @@ export default function TransportExpenses() {
     e.preventDefault();
     setError('');
     try {
-      const { data } = await client.post('/bus/vehicles', vehicleForm);
+      let saved;
+      if (editingVehicleId) {
+        ({ data: saved } = await client.put(`/bus/vehicles/${editingVehicleId}`, vehicleForm));
+      } else {
+        ({ data: saved } = await client.post('/bus/vehicles', vehicleForm));
+      }
       setVehicleForm(emptyVehicleForm);
+      setEditingVehicleId(null);
       setShowVehicleForm(false);
       await loadVehicles();
-      setSelectedVehicleId(String(data.id));
+      setSelectedVehicleId(String(saved.id));
     } catch (err) {
       setError(err.response?.data?.error || 'Could not save this vehicle.');
+    }
+  }
+
+  function openEditVehicle() {
+    if (!selectedVehicle) return;
+    setEditingVehicleId(selectedVehicle.id);
+    setVehicleForm({
+      vehicleNumber: selectedVehicle.vehicleNumber || '',
+      model: selectedVehicle.model || '',
+      capacity: selectedVehicle.capacity ?? '',
+      driverName: selectedVehicle.driverName || '',
+      driverPhone: selectedVehicle.driverPhone || '',
+      active: selectedVehicle.active !== false,
+    });
+    setShowVehicleForm(true);
+    setShowExpenseForm(false);
+    setError('');
+  }
+
+  async function handleDeleteVehicle() {
+    if (!selectedVehicle) return;
+    if (!window.confirm(`Delete vehicle ${selectedVehicle.vehicleNumber}? This only works for a vehicle with no expenses logged and no route assigned.`)) return;
+    setError('');
+    try {
+      await client.delete(`/bus/vehicles/${selectedVehicle.id}`);
+      const { data } = await client.get('/bus/vehicles');
+      setVehicles(data);
+      setSelectedVehicleId(data.length ? String(data[0].id) : '');
+      if (!data.length) setExpenses([]);
+      loadFleetSummary();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not delete this vehicle.');
     }
   }
 
@@ -91,8 +135,13 @@ export default function TransportExpenses() {
     e.preventDefault();
     setError('');
     try {
-      await client.post('/bus/expenses', { ...expenseForm, vehicleId: selectedVehicleId });
+      if (editingExpenseId) {
+        await client.put(`/bus/expenses/${editingExpenseId}`, expenseForm);
+      } else {
+        await client.post('/bus/expenses', { ...expenseForm, vehicleId: selectedVehicleId });
+      }
       setExpenseForm(emptyExpenseForm);
+      setEditingExpenseId(null);
       setShowExpenseForm(false);
       loadExpenses();
       loadFleetSummary();
@@ -101,10 +150,44 @@ export default function TransportExpenses() {
     }
   }
 
+  function openEditExpense(e) {
+    setEditingExpenseId(e.id);
+    setExpenseForm({
+      category: e.category,
+      description: e.description || '',
+      amount: e.amount,
+      expenseDate: e.expenseDate ? String(e.expenseDate).slice(0, 10) : emptyExpenseForm.expenseDate,
+      vendorName: e.vendorName || '',
+      odometerReading: e.odometerReading ?? '',
+      remarks: e.remarks || '',
+    });
+    setShowExpenseForm(true);
+    setShowVehicleForm(false);
+    setError('');
+  }
+
   async function handleDeleteExpense(id) {
-    await client.delete(`/bus/expenses/${id}`);
-    loadExpenses();
-    loadFleetSummary();
+    if (!window.confirm('Delete this expense record? This cannot be undone.')) return;
+    setError('');
+    try {
+      await client.delete(`/bus/expenses/${id}`);
+      loadExpenses();
+      loadFleetSummary();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not delete this expense.');
+    }
+  }
+
+  function closeVehicleForm() {
+    setShowVehicleForm(false);
+    setEditingVehicleId(null);
+    setVehicleForm(emptyVehicleForm);
+  }
+
+  function closeExpenseForm() {
+    setShowExpenseForm(false);
+    setEditingExpenseId(null);
+    setExpenseForm(emptyExpenseForm);
   }
 
   const selectedVehicle = vehicles.find((v) => String(v.id) === String(selectedVehicleId));
@@ -116,10 +199,22 @@ export default function TransportExpenses() {
         title="Transport Maintenance & Repairs"
         action={
           <div className="flex gap-2">
-            <button onClick={() => { setShowVehicleForm((v) => !v); setShowExpenseForm(false); }} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+            <button
+              onClick={() => {
+                if (showVehicleForm) closeVehicleForm();
+                else { setShowVehicleForm(true); closeExpenseForm(); }
+              }}
+              className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white"
+            >
               {showVehicleForm ? 'Cancel' : '+ New vehicle'}
             </button>
-            <button onClick={() => { setShowExpenseForm((v) => !v); setShowVehicleForm(false); }} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light">
+            <button
+              onClick={() => {
+                if (showExpenseForm) closeExpenseForm();
+                else { setShowExpenseForm(true); closeVehicleForm(); }
+              }}
+              className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light"
+            >
               {showExpenseForm ? 'Cancel' : '+ Log expense'}
             </button>
           </div>
@@ -209,8 +304,20 @@ export default function TransportExpenses() {
             <label className="block text-sm text-slate2 mb-1">Driver phone</label>
             <input value={vehicleForm.driverPhone} onChange={(e) => setVehicleForm({ ...vehicleForm, driverPhone: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
           </div>
+          {editingVehicleId && (
+            <label className="sm:col-span-3 flex items-center gap-2 text-sm text-slate2">
+              <input
+                type="checkbox"
+                checked={vehicleForm.active !== false}
+                onChange={(e) => setVehicleForm({ ...vehicleForm, active: e.target.checked })}
+              />
+              Vehicle is in service (untick to retire it while keeping its expense history)
+            </label>
+          )}
           <div className="sm:col-span-3">
-            <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Save vehicle</button>
+            <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">
+              {editingVehicleId ? 'Save changes' : 'Save vehicle'}
+            </button>
           </div>
         </form>
       )}
@@ -227,7 +334,7 @@ export default function TransportExpenses() {
               <select value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white">
                 {vehicles.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.vehicleNumber}{v.model ? ` — ${v.model}` : ''} {v.routes.length ? `(serving ${v.routes.map((r) => r.name).join(', ')})` : '(unassigned to a route)'}
+                    {v.vehicleNumber}{v.model ? ` — ${v.model}` : ''}{v.active === false ? ' [inactive]' : ''} {v.routes.length ? `(serving ${v.routes.map((r) => r.name).join(', ')})` : '(unassigned to a route)'}
                   </option>
                 ))}
               </select>
@@ -237,6 +344,12 @@ export default function TransportExpenses() {
                 {selectedVehicle.driverName && <>Driver: {selectedVehicle.driverName} {selectedVehicle.driverPhone && `(${selectedVehicle.driverPhone})`} · </>}
                 {selectedVehicle._count.expenses} expense record{selectedVehicle._count.expenses === 1 ? '' : 's'} total
               </p>
+            )}
+            {selectedVehicle && (
+              <div className="pb-2 flex gap-3">
+                <button onClick={openEditVehicle} className="text-xs text-ink hover:underline">Edit vehicle</button>
+                <button onClick={handleDeleteVehicle} className="text-xs text-absent hover:underline">Delete vehicle</button>
+              </div>
             )}
           </div>
 
@@ -273,7 +386,7 @@ export default function TransportExpenses() {
                 <input value={expenseForm.remarks} onChange={(e) => setExpenseForm({ ...expenseForm, remarks: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
               </div>
               <div className="sm:col-span-3">
-                <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Save expense</button>
+                <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">{editingExpenseId ? 'Save changes' : 'Save expense'}</button>
               </div>
             </form>
           )}
@@ -305,8 +418,11 @@ export default function TransportExpenses() {
                       <td className="px-4 py-3">{e.description}</td>
                       <td className="px-4 py-3 text-slate2">{e.vendorName || '—'}</td>
                       <td className="px-4 py-3 font-medium">Rs. {e.amount.toFixed(0)}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => handleDeleteExpense(e.id)} className="text-xs text-absent hover:underline">Delete</button>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <button onClick={() => openEditExpense(e)} className="text-xs text-ink hover:underline mr-3">Edit</button>
+                        {isAdmin && (
+                          <button onClick={() => handleDeleteExpense(e.id)} className="text-xs text-absent hover:underline">Delete</button>
+                        )}
                       </td>
                     </tr>
                   ))

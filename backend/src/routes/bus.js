@@ -60,12 +60,51 @@ router.put(
   '/vehicles/:id',
   requireRole('ADMIN', 'ACCOUNTANT'),
   asyncHandler(async (req, res) => {
-    const data = { ...req.body };
-    if (data.capacity) data.capacity = Number(data.capacity);
-    delete data.id;
+    const id = Number(req.params.id);
+    const { vehicleNumber, model, capacity, driverName, driverPhone, notes, active } = req.body;
+    const data = {};
 
-    const vehicle = await prisma.vehicle.update({ where: { id: Number(req.params.id) }, data });
+    if (vehicleNumber !== undefined) {
+      const number = String(vehicleNumber).trim();
+      if (!number) return res.status(400).json({ error: 'Vehicle number cannot be empty' });
+      const clash = await prisma.vehicle.findUnique({ where: { vehicleNumber: number } });
+      if (clash && clash.id !== id) return res.status(409).json({ error: 'A vehicle with this number already exists' });
+      data.vehicleNumber = number;
+    }
+    // A cleared optional field (empty string) is stored as null, not as ''.
+    if (model !== undefined) data.model = model || null;
+    if (capacity !== undefined) data.capacity = capacity === '' || capacity === null ? null : Number(capacity);
+    if (driverName !== undefined) data.driverName = driverName || null;
+    if (driverPhone !== undefined) data.driverPhone = driverPhone || null;
+    if (notes !== undefined) data.notes = notes || null;
+    if (active !== undefined) data.active = !!active;
+
+    const vehicle = await prisma.vehicle.update({ where: { id }, data });
     res.json(vehicle);
+  })
+);
+
+// DELETE /api/bus/vehicles/:id  (Admin/Accountant)
+// Only a vehicle with no expense history and no route using it can be deleted —
+// anything else would orphan records. A bus that has history but is out of
+// service should be marked inactive (Edit vehicle) rather than deleted.
+router.delete(
+  '/vehicles/:id',
+  requireRole('ADMIN', 'ACCOUNTANT'),
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const [expenses, routes] = await Promise.all([
+      prisma.busExpense.count({ where: { vehicleId: id } }),
+      prisma.busRoute.count({ where: { vehicleId: id } }),
+    ]);
+    if (routes > 0) {
+      return res.status(409).json({ error: `Cannot delete: this vehicle is still assigned to ${routes} route(s). Reassign them from Bus Fee Collection first.` });
+    }
+    if (expenses > 0) {
+      return res.status(409).json({ error: `Cannot delete: this vehicle has ${expenses} expense record(s). Keep it for the history, or mark it inactive instead.` });
+    }
+    await prisma.vehicle.delete({ where: { id } });
+    res.status(204).send();
   })
 );
 
@@ -783,13 +822,20 @@ router.put(
   '/expenses/:id',
   requireRole('ADMIN', 'ACCOUNTANT'),
   asyncHandler(async (req, res) => {
-    const data = { ...req.body };
-    if (data.vehicleId) data.vehicleId = Number(data.vehicleId);
-    if (data.amount) data.amount = Number(data.amount);
-    if (data.expenseDate) data.expenseDate = new Date(data.expenseDate);
-    if (data.odometerReading) data.odometerReading = Number(data.odometerReading);
-    delete data.id;
-    delete data.recordedById;
+    const { vehicleId, category, description, amount, expenseDate, vendorName, odometerReading, remarks } = req.body;
+    const data = {};
+    if (vehicleId) data.vehicleId = Number(vehicleId);
+    if (category) data.category = category;
+    if (description !== undefined) {
+      if (!String(description).trim()) return res.status(400).json({ error: 'Description cannot be empty' });
+      data.description = description;
+    }
+    if (amount !== undefined && amount !== '') data.amount = Number(amount);
+    if (expenseDate) data.expenseDate = new Date(expenseDate);
+    // A cleared optional field is stored as null, not as ''.
+    if (vendorName !== undefined) data.vendorName = vendorName || null;
+    if (odometerReading !== undefined) data.odometerReading = odometerReading === '' || odometerReading === null ? null : Number(odometerReading);
+    if (remarks !== undefined) data.remarks = remarks || null;
 
     const expense = await prisma.busExpense.update({
       where: { id: Number(req.params.id) },
