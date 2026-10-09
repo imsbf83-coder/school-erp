@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import client from '../api/client';
 import PageHeader from '../components/PageHeader';
 
 function currentMonth() {
   return new Date().toISOString().slice(0, 7); // "YYYY-MM"
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 const emptyPassengerForm = { name: '', guardianName: '', guardianPhone: '', pickupPoint: '', note: '' };
@@ -46,7 +51,13 @@ export default function BusFees() {
     amount: '',
     paymentMethod: 'CASH',
     remarks: '',
+    paymentDate: todayISO(),
   });
+  // Set while an already-recorded payment is being corrected (PUT) instead of a new one (POST).
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
+  const [editingRoute, setEditingRoute] = useState(false);
+  const [routeEditForm, setRouteEditForm] = useState({ name: '', monthlyFee: '' });
+  const [editingPassengerId, setEditingPassengerId] = useState(null);
   const [discountTarget, setDiscountTarget] = useState(null); // { riderType, riderId, name }
   const [discountForm, setDiscountForm] = useState({ discount: '', discountReason: 'SIBLING' });
   const [error, setError] = useState('');
@@ -98,10 +109,80 @@ export default function BusFees() {
 
   async function handleAddPassenger(e) {
     e.preventDefault();
-    await client.post('/bus/passengers', { ...passengerForm, busRouteId: selectedRouteId });
-    setPassengerForm(emptyPassengerForm);
-    setShowPassengerForm(false);
-    loadRouteData();
+    setError('');
+    try {
+      if (editingPassengerId) {
+        await client.put(`/bus/passengers/${editingPassengerId}`, passengerForm);
+      } else {
+        await client.post('/bus/passengers', { ...passengerForm, busRouteId: selectedRouteId });
+      }
+      setPassengerForm(emptyPassengerForm);
+      setEditingPassengerId(null);
+      setShowPassengerForm(false);
+      loadRouteData();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not save this passenger.');
+    }
+  }
+
+  function openEditPassenger(rider) {
+    setEditingPassengerId(rider.riderId);
+    setPassengerForm({
+      name: rider.name || '',
+      guardianName: rider.guardianName || '',
+      guardianPhone: rider.guardianPhone || '',
+      pickupPoint: rider.pickupPoint || '',
+      note: rider.note || '',
+    });
+    setShowPassengerForm(true);
+    setError('');
+  }
+
+  async function handleRemovePassenger(rider) {
+    if (!window.confirm(`Remove ${rider.name} from this route? They stop being billed; their payment history is kept.`)) return;
+    setError('');
+    try {
+      await client.delete(`/bus/passengers/${rider.riderId}`);
+      loadRouteData();
+      loadRoutes();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not remove this passenger.');
+    }
+  }
+
+  // ---- route edit / delete ----
+  function openRouteEdit() {
+    if (!selectedRoute) return;
+    setRouteEditForm({ name: selectedRoute.name, monthlyFee: selectedRoute.monthlyFee });
+    setEditingRoute(true);
+    setError('');
+  }
+
+  async function handleSaveRoute(e) {
+    e.preventDefault();
+    setError('');
+    try {
+      await client.put(`/bus/routes/${selectedRoute.id}`, routeEditForm);
+      setEditingRoute(false);
+      loadRoutes();
+      loadRouteData();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not update this route.');
+    }
+  }
+
+  async function handleDeleteRoute() {
+    if (!selectedRoute) return;
+    if (!window.confirm(`Delete route "${selectedRoute.name}"? This only works for an empty route (no riders, no payments).`)) return;
+    setError('');
+    try {
+      await client.delete(`/bus/routes/${selectedRoute.id}`);
+      const { data } = await client.get('/bus/routes');
+      setRoutes(data);
+      setSelectedRouteId(data.length ? String(data[0].id) : '');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not delete this route.');
+    }
   }
 
   const selectedRoute = routes.find((r) => String(r.id) === String(selectedRouteId));
@@ -114,6 +195,7 @@ export default function BusFees() {
     const discount = rider.busFeeDiscount || '';
     setDiscountTarget(null);
     setError('');
+    setEditingPaymentId(null);
     setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name });
     setPaymentForm({
       grossFee,
@@ -122,7 +204,37 @@ export default function BusFees() {
       amount: netPayable(grossFee, discount),
       paymentMethod: 'CASH',
       remarks: '',
+      paymentDate: todayISO(),
     });
+  }
+
+  // Re-open an already-recorded payment so its amount, discount, date, method
+  // or remarks can be corrected.
+  function openEditPayment(rider, payment) {
+    setDiscountTarget(null);
+    setError('');
+    setEditingPaymentId(payment.id);
+    setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name });
+    setPaymentForm({
+      grossFee: payment.grossFee ?? rider.monthlyFee ?? '',
+      discount: payment.discount || '',
+      discountReason: payment.discountReason || '',
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod || 'CASH',
+      remarks: payment.remarks || '',
+      paymentDate: payment.paymentDate ? String(payment.paymentDate).slice(0, 10) : todayISO(),
+    });
+  }
+
+  async function handleDeletePayment(rider, payment) {
+    if (!window.confirm(`Delete ${rider.name}'s ${month} payment of Rs. ${payment.amount}? They will show as Due again.`)) return;
+    setError('');
+    try {
+      await client.delete(`/bus/payments/${payment.id}`);
+      loadRouteData();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not delete this payment.');
+    }
   }
 
   // Amount follows the discount so the common case needs no arithmetic, but
@@ -145,14 +257,27 @@ export default function BusFees() {
     e.preventDefault();
     setError('');
     try {
-      await client.post('/bus/payments', {
-        ...paymentForm,
-        riderType: paymentTarget.riderType,
-        riderId: paymentTarget.riderId,
-        busRouteId: selectedRouteId,
-        month,
-      });
+      if (editingPaymentId) {
+        await client.put(`/bus/payments/${editingPaymentId}`, {
+          amount: paymentForm.amount,
+          grossFee: paymentForm.grossFee,
+          discount: Number(paymentForm.discount || 0),
+          discountReason: paymentForm.discountReason,
+          paymentMethod: paymentForm.paymentMethod,
+          remarks: paymentForm.remarks,
+          paymentDate: paymentForm.paymentDate,
+        });
+      } else {
+        await client.post('/bus/payments', {
+          ...paymentForm,
+          riderType: paymentTarget.riderType,
+          riderId: paymentTarget.riderId,
+          busRouteId: selectedRouteId,
+          month,
+        });
+      }
       setPaymentTarget(null);
+      setEditingPaymentId(null);
       loadRouteData();
     } catch (err) {
       setError(err.response?.data?.error || 'Could not record this payment.');
@@ -177,9 +302,10 @@ export default function BusFees() {
   }
 
   // Build a quick lookup of who's paid this month, keyed by "TYPE-id"
-  const paidKeys = new Set(
-    payments.map((p) => (p.studentId ? `STUDENT-${p.studentId}` : `PASSENGER-${p.busPassengerId}`))
+  const paymentByKey = new Map(
+    payments.map((p) => [p.studentId ? `STUDENT-${p.studentId}` : `PASSENGER-${p.busPassengerId}`, p])
   );
+  const paidKeys = new Set(paymentByKey.keys());
 
   // Reported, not deducted: `amount` is already net of the discount, so the
   // Paid figure and this one are independent readings of the same month.
@@ -191,9 +317,14 @@ export default function BusFees() {
         eyebrow="Module 06"
         title="Bus Fee Collection"
         action={
-          <button onClick={() => setShowRouteForm((v) => !v)} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light">
-            {showRouteForm ? 'Cancel' : '+ New route'}
-          </button>
+          <div className="flex gap-2">
+            <Link to="/bus-reports" className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+              Bus reports
+            </Link>
+            <button onClick={() => setShowRouteForm((v) => !v)} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light">
+              {showRouteForm ? 'Cancel' : '+ New route'}
+            </button>
+          </div>
         }
       />
 
@@ -265,15 +396,43 @@ export default function BusFees() {
                   <option value="">Unassigned</option>
                   {vehicles.map((v) => <option key={v.id} value={v.id}>{v.vehicleNumber}</option>)}
                 </select>
+                <button onClick={openRouteEdit} className="text-xs text-ink hover:underline ml-3">Edit route</button>
+                <button onClick={handleDeleteRoute} className="text-xs text-absent hover:underline ml-3">Delete route</button>
               </div>
             )}
             <button
-              onClick={() => setShowPassengerForm((v) => !v)}
+              onClick={() => {
+                if (showPassengerForm) {
+                  setEditingPassengerId(null);
+                  setPassengerForm(emptyPassengerForm);
+                }
+                setShowPassengerForm((v) => !v);
+              }}
               className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white ml-auto"
             >
               {showPassengerForm ? 'Cancel' : '+ Add bus-only passenger'}
             </button>
           </div>
+
+          {editingRoute && (
+            <form onSubmit={handleSaveRoute} className="bg-white border border-ink/10 rounded-lg p-6 mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Route name</label>
+                <input required value={routeEditForm.name} onChange={(e) => setRouteEditForm({ ...routeEditForm, name: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate2 mb-1">Monthly fee</label>
+                <input required type="number" min="0" value={routeEditForm.monthlyFee} onChange={(e) => setRouteEditForm({ ...routeEditForm, monthlyFee: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Save route</button>
+                <button type="button" onClick={() => setEditingRoute(false)} className="text-sm px-4 py-2 rounded-md border border-ink/20">Cancel</button>
+              </div>
+              <p className="sm:col-span-3 text-xs text-slate2">
+                A new fee applies to payments recorded from now on; receipts already recorded keep the fee they were taken at.
+              </p>
+            </form>
+          )}
 
           {showPassengerForm && (
             <form onSubmit={handleAddPassenger} className="bg-white border border-ink/10 rounded-lg p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -301,7 +460,7 @@ export default function BusFees() {
                 <input placeholder="e.g. Junior section - not yet enrolled, sibling of STU-0002" value={passengerForm.note} onChange={(e) => setPassengerForm({ ...passengerForm, note: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
               </div>
               <div className="sm:col-span-2">
-                <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Add passenger</button>
+                <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">{editingPassengerId ? 'Save passenger' : 'Add passenger'}</button>
               </div>
             </form>
           )}
@@ -331,7 +490,7 @@ export default function BusFees() {
           {paymentTarget && (
             <form onSubmit={handleRecordPayment} className="bg-white border border-ink/10 rounded-lg p-6 mb-6">
               <p className="text-sm text-slate2 mb-4">
-                Recording <span className="font-medium text-ink">{paymentTarget.name}</span>'s bus fee for {month}.
+                {editingPaymentId ? 'Editing' : 'Recording'} <span className="font-medium text-ink">{paymentTarget.name}</span>'s bus fee for {month}.
               </p>
               {error && <p className="text-absent text-sm mb-4">{error}</p>}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
@@ -382,13 +541,23 @@ export default function BusFees() {
                     <option value="CHEQUE">Cheque</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-sm text-slate2 mb-1">Collection date</label>
+                  <input
+                    required
+                    type="date"
+                    value={paymentForm.paymentDate}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                    className="w-full border border-ink/20 rounded-md px-3 py-2"
+                  />
+                </div>
                 <div className="sm:col-span-2">
                   <label className="block text-sm text-slate2 mb-1">Remarks</label>
                   <input value={paymentForm.remarks} onChange={(e) => setPaymentForm({ ...paymentForm, remarks: e.target.value })} className="w-full border border-ink/20 rounded-md px-3 py-2" />
                 </div>
                 <div className="flex gap-2 col-span-2 sm:col-span-1">
-                  <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">Record payment</button>
-                  <button type="button" onClick={() => setPaymentTarget(null)} className="text-sm px-4 py-2 rounded-md border border-ink/20">Cancel</button>
+                  <button type="submit" className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90">{editingPaymentId ? 'Save changes' : 'Record payment'}</button>
+                  <button type="button" onClick={() => { setPaymentTarget(null); setEditingPaymentId(null); }} className="text-sm px-4 py-2 rounded-md border border-ink/20">Cancel</button>
                 </div>
               </div>
               <p className="text-xs text-slate2 mt-3">
@@ -484,7 +653,14 @@ export default function BusFees() {
                         </td>
                         <td className="px-4 py-3">
                           {paid ? (
-                            <span className="text-xs px-2 py-1 rounded-full font-medium bg-present/10 text-present">Paid</span>
+                            <>
+                              <span className="text-xs px-2 py-1 rounded-full font-medium bg-present/10 text-present">Paid</span>
+                              {paymentByKey.get(key)?.paymentDate && (
+                                <span className="block text-xs text-slate2 mt-1">
+                                  {new Date(paymentByKey.get(key).paymentDate).toLocaleDateString()} · Rs. {paymentByKey.get(key).amount}
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <span className="text-xs px-2 py-1 rounded-full font-medium bg-absent/10 text-absent">Due</span>
                           )}
@@ -495,9 +671,29 @@ export default function BusFees() {
                               Record payment
                             </button>
                           )}
+                          {paid && (
+                            <>
+                              <button onClick={() => openEditPayment(r, paymentByKey.get(key))} className="text-xs text-ink hover:underline mr-3">
+                                Edit payment
+                              </button>
+                              <button onClick={() => handleDeletePayment(r, paymentByKey.get(key))} className="text-xs text-absent hover:underline mr-3">
+                                Delete payment
+                              </button>
+                            </>
+                          )}
                           <button onClick={() => openDiscountForm(r)} className="text-xs text-slate2 hover:underline">
                             {r.busFeeDiscount > 0 ? 'Edit discount' : 'Set discount'}
                           </button>
+                          {r.riderType === 'PASSENGER' && (
+                            <>
+                              <button onClick={() => openEditPassenger(r)} className="text-xs text-ink hover:underline ml-3">
+                                Edit
+                              </button>
+                              <button onClick={() => handleRemovePassenger(r)} className="text-xs text-absent hover:underline ml-3">
+                                Remove
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     );

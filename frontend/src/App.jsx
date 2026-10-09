@@ -8,6 +8,7 @@ import Exams from './pages/Exams';
 import Admissions from './pages/Admissions';
 import Staff from './pages/Staff';
 import BusFees from './pages/BusFees';
+import BusReports from './pages/BusReports';
 import TransportExpenses from './pages/TransportExpenses';
 import Reports from './pages/Reports';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -30,6 +31,7 @@ export default function App() {
           granted the STAFF module (e.g. a Coordinator handling HR tasks). */}
       <Route path="/staff" element={<ProtectedRoute roles={['ADMIN']} moduleKey="STAFF"><Staff /></ProtectedRoute>} />
       <Route path="/bus-fees" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusFees /></ProtectedRoute>} />
+      <Route path="/bus-reports" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusReports /></ProtectedRoute>} />
       <Route path="/transport-expenses" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT']} moduleKey="BUS"><TransportExpenses /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     </Routes>
