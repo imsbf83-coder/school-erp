@@ -1,5 +1,5 @@
 // Bus Reports — seven views of the same rider list (GET /bus/report-riders):
-//   1. Student / Class wise      4. Student / Bus passenger wise
+//   1. Student / Class wise      4. Bus-only passenger wise
 //   2. Student / Bus wise        5. Paid list
 //   3. Students / School wise    6. Due list      7. Discounted list
 //
@@ -55,6 +55,7 @@ const C = {
   paidDate: { label: 'Collection date', get: (r) => dateLabel(r.payment?.paymentDate) },
   paidMethod: { label: 'Method', get: (r) => METHOD_LABELS[r.payment?.paymentMethod] || r.payment?.paymentMethod || '—' },
   paidRemarks: { label: 'Remarks', get: (r) => r.payment?.remarks || '—' },
+  note: { label: 'Note', get: (r) => r.note || '—' },
   monthDiscountReason: { label: 'Reason (this month)', get: (r) => (r.payment?.discount > 0 ? reasonLabel(r.payment.discountReason) : '—') },
 };
 
@@ -81,11 +82,16 @@ const REPORTS = [
     columns: [C.admn, C.name, C.cls, C.father, C.phone, C.route, C.bus, C.pickup, C.fee, C.standing, C.status],
   },
   {
-    key: 'type',
-    label: 'Student / Bus passenger wise',
-    filter: () => true,
-    groupBy: (r) => (isStudent(r) ? 'Enrolled students' : 'Bus-only passengers'),
-    columns: [C.admn, C.name, C.cls, C.father, C.phone, C.route, C.bus, C.pickup, C.fee, C.status],
+    key: 'passenger',
+    label: 'Bus-only passenger wise',
+    noun: 'passenger',
+    // Riders who are NOT enrolled students (e.g. a junior-section child too
+    // young to be admitted, or a sibling who only uses the bus). They have no
+    // admission number or class, so those columns are left out; the note says
+    // who they are. Grouped by bus, like the student bus-wise report.
+    filter: (r) => !isStudent(r),
+    groupBy: (r) => `${r.vehicleNumber} — ${r.routeName}`,
+    columns: [C.name, C.father, C.phone, C.route, C.bus, C.pickup, C.fee, C.standing, C.status, C.note],
   },
   {
     key: 'paid',
@@ -142,6 +148,10 @@ export default function BusReports() {
   }, [month]);
 
   const report = REPORTS.find((r) => r.key === reportKey);
+  // Bus-only passengers have no class, so the Class filter is meaningless there
+  // (and would hide everyone) — it is hidden and ignored for that report.
+  const classFilterApplies = report.key !== 'passenger';
+  const noun = report.noun || 'rider';
 
   // Classes that actually have bus riders, for the class filter.
   const classOptions = useMemo(() => {
@@ -157,14 +167,14 @@ export default function BusReports() {
     return allRows.filter((r) => {
       if (!report.filter(r)) return false;
       if (routeId && String(r.routeId) !== String(routeId)) return false;
-      if (classId && String(r.classId) !== String(classId)) return false;
+      if (classFilterApplies && classId && String(r.classId) !== String(classId)) return false;
       if (needle) {
         const hay = `${r.name} ${r.admissionNumber} ${r.guardianName}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [allRows, report, routeId, classId, search]);
+  }, [allRows, report, routeId, classId, classFilterApplies, search]);
 
   // Keep the server's ordering; just bucket rows under their group heading.
   const groups = useMemo(() => {
@@ -255,13 +265,15 @@ export default function BusReports() {
               {routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>
-          <div>
-            <label className="block text-sm text-slate2 mb-1">Class</label>
-            <select value={classId} onChange={(e) => setClassId(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white">
-              <option value="">All classes</option>
-              {classOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
+          {classFilterApplies && (
+            <div>
+              <label className="block text-sm text-slate2 mb-1">Class</label>
+              <select value={classId} onChange={(e) => setClassId(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white">
+                <option value="">All classes</option>
+                {classOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm text-slate2 mb-1">Search</label>
             <input
@@ -290,7 +302,7 @@ export default function BusReports() {
           <p className="font-display text-xl">{report.label}</p>
           <p className="text-sm text-slate2">
             {monthlyReport ? `Month: ${month} · ` : ''}
-            {rows.length} {rows.length === 1 ? 'rider' : 'riders'}
+            {rows.length} {rows.length === 1 ? noun : `${noun}s`}
             {routeId ? ` · ${routes.find((r) => String(r.id) === String(routeId))?.name || ''}` : ''}
             {report.summary && rows.length > 0 ? ` · ${report.summary(rows)}` : ''}
           </p>
@@ -313,7 +325,7 @@ export default function BusReports() {
               {loading ? (
                 <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>No riders match this report.</td></tr>
+                <tr><td className="px-4 py-6 text-slate2" colSpan={colCount}>No {noun}s match this report.</td></tr>
               ) : (
                 groups.map((g, gi) => (
                   <GroupRows

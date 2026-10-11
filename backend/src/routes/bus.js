@@ -746,6 +746,7 @@ router.get(
               section: '',
               guardianName: p.guardianName,
               guardianPhone: p.guardianPhone || '',
+              note: p.note || '',
             },
           },
           p,
