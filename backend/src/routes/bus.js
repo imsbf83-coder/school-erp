@@ -31,7 +31,7 @@ router.get(
 // POST /api/bus/vehicles  (Admin/Accountant)
 router.post(
   '/vehicles',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [body('vehicleNumber').notEmpty()],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -58,7 +58,7 @@ router.post(
 // PUT /api/bus/vehicles/:id  (Admin/Accountant)
 router.put(
   '/vehicles/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const { vehicleNumber, model, capacity, driverName, driverPhone, notes, active } = req.body;
@@ -90,7 +90,7 @@ router.put(
 // service should be marked inactive (Edit vehicle) rather than deleted.
 router.delete(
   '/vehicles/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const [expenses, routes] = await Promise.all([
@@ -138,7 +138,7 @@ router.get(
 // POST /api/bus/routes  (Admin/Accountant)
 router.post(
   '/routes',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [body('name').notEmpty(), body('monthlyFee').isFloat({ min: 0 })],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -158,7 +158,7 @@ router.post(
 // vehicle they were logged against, so swapping buses on a route never loses data.
 router.post(
   '/routes/:id/vehicle',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const { vehicleId } = req.body;
     const route = await prisma.busRoute.update({
@@ -176,7 +176,7 @@ router.post(
 // Body: { studentId, busRouteId (null to remove), busPickupPoint }
 router.post(
   '/assign',
-  requireRole('ADMIN', 'STAFF', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'STAFF', 'ACCOUNTANT'], MODULES.BUS),
   [body('studentId').isInt()],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -217,7 +217,7 @@ router.get(
 // Body: { name, guardianName, guardianPhone, busRouteId, pickupPoint, note }
 router.post(
   '/passengers',
-  requireRole('ADMIN', 'STAFF', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'STAFF', 'ACCOUNTANT'], MODULES.BUS),
   [
     body('name').notEmpty(),
     body('guardianName').notEmpty(),
@@ -246,7 +246,7 @@ router.post(
 // PUT /api/bus/passengers/:id  (edit details, change route, or deactivate)
 router.put(
   '/passengers/:id',
-  requireRole('ADMIN', 'STAFF', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'STAFF', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const data = { ...req.body };
     if (data.busRouteId) data.busRouteId = Number(data.busRouteId);
@@ -263,7 +263,7 @@ router.put(
 // DELETE /api/bus/passengers/:id  (soft delete — stops billing them, keeps payment history)
 router.delete(
   '/passengers/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const passenger = await prisma.busPassenger.update({
       where: { id: Number(req.params.id) },
@@ -345,11 +345,11 @@ router.get(
 // to remove it. A single month's discount is set on the payment itself.
 router.post(
   '/riders/discount',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [
     body('riderType').isIn(['STUDENT', 'PASSENGER']),
     body('riderId').isInt(),
-    body('discount').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('discount').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
     body('discountReason').optional({ nullable: true, checkFalsy: true }).isIn(DISCOUNT_REASONS),
   ],
   asyncHandler(async (req, res) => {
@@ -482,15 +482,15 @@ router.get(
 // POST /riders/discount and merely pre-fills this one.
 router.post(
   '/payments',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [
     body('riderType').isIn(['STUDENT', 'PASSENGER']),
     body('riderId').isInt(),
     body('busRouteId').isInt(),
     body('month').matches(/^\d{4}-\d{2}$/),
     body('amount').isFloat({ min: 0 }),
-    body('grossFee').optional({ nullable: true }).isFloat({ min: 0 }),
-    body('discount').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('grossFee').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
+    body('discount').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
     body('discountReason').optional({ nullable: true, checkFalsy: true }).isIn(DISCOUNT_REASONS),
   ],
   asyncHandler(async (req, res) => {
@@ -562,11 +562,11 @@ router.post(
 // paymentDate. `amount` stays the net received, same as when recording.
 router.put(
   '/payments/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [
     body('amount').optional().isFloat({ min: 0 }),
-    body('grossFee').optional({ nullable: true }).isFloat({ min: 0 }),
-    body('discount').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('grossFee').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
+    body('discount').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
     body('discountReason').optional({ nullable: true, checkFalsy: true }).isIn(DISCOUNT_REASONS),
   ],
   asyncHandler(async (req, res) => {
@@ -601,7 +601,7 @@ router.put(
 // the rider goes back to "due" for that month)
 router.delete(
   '/payments/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     await prisma.busFeePayment.delete({ where: { id: Number(req.params.id) } });
     res.status(204).send();
@@ -613,7 +613,7 @@ router.delete(
 // grossFee they were recorded with.
 router.put(
   '/routes/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [body('name').optional().notEmpty(), body('monthlyFee').optional().isFloat({ min: 0 })],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -630,7 +630,7 @@ router.put(
 // DELETE /api/bus/routes/:id  (Admin/Accountant - only an empty route: no riders, no payments)
 router.delete(
   '/routes/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const [students, passengers, payments] = await Promise.all([
@@ -787,7 +787,7 @@ router.get(
 // POST /api/bus/expenses  (Admin/Accountant - log a repair/maintenance/fuel expense against a vehicle)
 router.post(
   '/expenses',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   [
     body('vehicleId').isInt(),
     body('category').isIn(['FUEL', 'REPAIR', 'MAINTENANCE', 'INSURANCE', 'PERMIT_OR_TAX', 'OTHER']),
@@ -820,7 +820,7 @@ router.post(
 // PUT /api/bus/expenses/:id  (Admin/Accountant)
 router.put(
   '/expenses/:id',
-  requireRole('ADMIN', 'ACCOUNTANT'),
+  requireRoleOrPermission(['ADMIN', 'ACCOUNTANT'], MODULES.BUS),
   asyncHandler(async (req, res) => {
     const { vehicleId, category, description, amount, expenseDate, vendorName, odometerReading, remarks } = req.body;
     const data = {};

@@ -356,9 +356,14 @@ export default function Students() {
 
   async function handleBusRouteChange(studentId, busRouteId) {
     setSavingId(studentId);
+    setError('');
     try {
       await client.post('/bus/assign', { studentId, busRouteId: busRouteId || null });
       loadStudents(filters);
+    } catch (err) {
+      // The dropdown is driven by the saved value, so it snaps back on its own;
+      // this just says why, instead of leaving the user guessing.
+      setError(err.response?.data?.error || 'Could not change this student\'s bus route.');
     } finally {
       setSavingId(null);
     }

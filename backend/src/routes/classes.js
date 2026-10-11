@@ -59,7 +59,7 @@ router.get(
     let allowedClassIds = await getAllowedClassIds(req.user);
     let allowedSections = await getAllowedSections(req.user);
 
-    // A TEACHER who ALSO holds the EXAMS or STUDENTS module permission
+    // A TEACHER who ALSO holds the EXAMS, STUDENTS or BUS module permission
     // (e.g. an Exam Incharge or Admission Incharge who isn't a class
     // teacher at all) should see every class here, not just the ones
     // they're personally assigned to via TeacherClass — otherwise someone
@@ -68,7 +68,11 @@ router.get(
     // filters, etc.). Same override as exams.js#getExamClassScope.
     if (allowedClassIds !== null) {
       const userModules = await getUserModules(req.user);
-      if (hasModule(userModules, MODULES.EXAMS) || hasModule(userModules, MODULES.STUDENTS)) {
+      if (
+        hasModule(userModules, MODULES.EXAMS) ||
+        hasModule(userModules, MODULES.STUDENTS) ||
+        hasModule(userModules, MODULES.BUS)
+      ) {
         allowedClassIds = null;
         allowedSections = null;
       }
