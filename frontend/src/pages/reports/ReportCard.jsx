@@ -29,6 +29,18 @@ function classLabel(row) {
   return [grade, row.section].filter(Boolean).join(' ');
 }
 
+// The exam name may already contain a short/long academic year (for example,
+// "MID-TERM 2026-27"). Avoid appending the same year a second time.
+function examTitle(exam) {
+  if (!exam) return '';
+  const name = exam.name || '';
+  const academicYear = exam.academicYear || '';
+  if (!academicYear) return name;
+  const yearParts = academicYear.match(/\d{2,4}/g) || [];
+  const yearAlreadyShown = yearParts.some((part) => name.includes(part)) || name.includes(academicYear);
+  return yearAlreadyShown ? name : `${name}, ${academicYear}`;
+}
+
 const STATUS_LABEL = { PASS: 'Pass', PROMOTE: 'Promoted', FAIL: 'Fail' };
 
 export default function ReportCard() {
@@ -92,7 +104,7 @@ export default function ReportCard() {
         <div key={row.studentId} className="bg-white border border-ink/10 mb-6 print:mb-0 print:border-0" style={idx < cards.length - 1 ? { breakAfter: 'page' } : undefined}>
           <div className="p-8 max-w-2xl mx-auto print:max-w-none">
             <div className="flex items-center justify-center gap-4 mb-2"><img src={SCHOOL_INFO.logo} alt="" className="w-16 h-16 object-contain shrink-0" /><h1 className="font-display text-xl leading-tight text-center uppercase">{SCHOOL_INFO.name}</h1></div>
-            <p className="text-center font-semibold underline mb-4 uppercase">{exam?.name}{exam?.academicYear ? `, ${exam.academicYear}` : ''}</p>
+            <p className="text-center font-semibold underline mb-4 uppercase">{examTitle(exam)}</p>
             <div className="bg-ink text-paper text-center font-display text-lg tracking-wide py-2 mb-4">RESULT CARD</div>
             <table className="w-full text-sm border border-ink/30 mb-4"><tbody><tr><td className="border border-ink/30 px-3 py-1.5 font-semibold w-1/4">Student's Name</td><td className="border border-ink/30 px-3 py-1.5 font-semibold underline" colSpan={5}>{row.name}</td></tr><tr><td className="border border-ink/30 px-3 py-1.5 font-semibold">Father's Name</td><td className="border border-ink/30 px-3 py-1.5 font-semibold underline" colSpan={5}>{row.guardianName}</td></tr><tr><td className="border border-ink/30 px-3 py-1.5 font-semibold">Class</td><td className="border border-ink/30 px-3 py-1.5">{classLabel(row)}</td><td className="border border-ink/30 px-3 py-1.5 font-semibold">Admn #</td><td className="border border-ink/30 px-3 py-1.5 underline">{row.admissionNumber}</td><td className="border border-ink/30 px-3 py-1.5 font-semibold">Exam No.</td><td className="border border-ink/30 px-3 py-1.5 underline">{dash(row.rollNumber)}</td></tr></tbody></table>
             <table className="w-full text-sm border border-ink/30 mb-4"><thead><tr className="bg-paper"><th className="border border-ink/30 px-3 py-1.5 text-left">Subject</th><th className="border border-ink/30 px-3 py-1.5">Marks Total</th><th className="border border-ink/30 px-3 py-1.5">Marks Obtained</th><th className="border border-ink/30 px-3 py-1.5">%</th><th className="border border-ink/30 px-3 py-1.5">Grade</th><th className="border border-ink/30 px-3 py-1.5">Remarks</th></tr></thead><tbody>{row.subjects.filter((s) => s.applicable).map((s) => <tr key={s.examSubjectId}><td className="border border-ink/30 px-3 py-1.5 font-semibold">{s.subjectName}</td><td className="border border-ink/30 px-3 py-1.5 text-center">{s.maxMarks}</td><td className="border border-ink/30 px-3 py-1.5 text-center">{s.appeared ? s.marks : 'Absent'}</td><td className="border border-ink/30 px-3 py-1.5 text-center">{s.appeared ? `${s.percent.toFixed(2)}%` : '—'}</td><td className="border border-ink/30 px-3 py-1.5 text-center">{dash(s.grade)}</td><td className="border border-ink/30 px-3 py-1.5 text-center">{dash(s.remarks)}</td></tr>)}</tbody></table>
