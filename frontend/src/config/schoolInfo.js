@@ -3,5 +3,5 @@
 export const SCHOOL_INFO = {
   name: 'Islamabad Model School For Boys (VI-X), F-8/3',
   logo: '/school-logo.png',
-  principalSignature: '/principal-signature.svg',
+  principalSignature: '/principal-signature.jpeg',
 };
