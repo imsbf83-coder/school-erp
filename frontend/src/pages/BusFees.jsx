@@ -11,6 +11,9 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Special value of the route dropdown: show riders from every route at once.
+const ALL_ROUTES = 'ALL';
+
 const emptyPassengerForm = { name: '', guardianName: '', guardianPhone: '', pickupPoint: '', note: '' };
 
 // Must stay in step with DISCOUNT_REASONS in backend/src/routes/bus.js — the
@@ -62,6 +65,7 @@ export default function BusFees() {
   const [discountForm, setDiscountForm] = useState({ discount: '', discountReason: 'SIBLING' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     loadRoutes();
@@ -84,6 +88,39 @@ export default function BusFees() {
   }
 
   async function loadRouteData() {
+    if (selectedRouteId === ALL_ROUTES) {
+      // Every rider on every bus, with this month's payment status, from the
+      // report endpoint; reshaped to match what /bus/riders returns per route.
+      const [rowsRes, paymentsRes] = await Promise.all([
+        client.get('/bus/report-riders', { params: { month } }),
+        client.get('/bus/payments', { params: { month } }),
+      ]);
+      const rows = rowsRes.data.rows;
+      setRiders(
+        rows.map((r) => ({
+          riderType: r.riderType,
+          riderId: r.riderId,
+          name: r.name,
+          admissionNumber: r.admissionNumber,
+          classLabel: r.className,
+          section: r.section,
+          guardianName: r.guardianName,
+          guardianPhone: r.guardianPhone,
+          pickupPoint: r.pickupPoint,
+          note: r.note,
+          routeId: r.routeId,
+          routeName: r.routeName,
+          monthlyFee: r.monthlyFee,
+          busFeeDiscount: r.standingDiscount,
+          busFeeDiscountReason: r.standingDiscountReason,
+          netPayable: r.netPayable,
+        }))
+      );
+      setPayments(paymentsRes.data);
+      const unpaid = rows.filter((r) => !r.paid);
+      setDues({ dues: unpaid, totalExpected: unpaid.reduce((sum, r) => sum + (r.netPayable || 0), 0) });
+      return;
+    }
     const [ridersRes, paymentsRes, duesRes] = await Promise.all([
       client.get('/bus/riders', { params: { busRouteId: selectedRouteId } }),
       client.get('/bus/payments', { params: { busRouteId: selectedRouteId, month } }),
@@ -196,7 +233,7 @@ export default function BusFees() {
     setDiscountTarget(null);
     setError('');
     setEditingPaymentId(null);
-    setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name });
+    setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name, admissionNumber: rider.admissionNumber, routeId: rider.routeId ?? selectedRouteId });
     setPaymentForm({
       grossFee,
       discount,
@@ -214,7 +251,7 @@ export default function BusFees() {
     setDiscountTarget(null);
     setError('');
     setEditingPaymentId(payment.id);
-    setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name });
+    setPaymentTarget({ riderType: rider.riderType, riderId: rider.riderId, name: rider.name, admissionNumber: rider.admissionNumber, routeId: rider.routeId ?? selectedRouteId });
     setPaymentForm({
       grossFee: payment.grossFee ?? rider.monthlyFee ?? '',
       discount: payment.discount || '',
@@ -272,7 +309,7 @@ export default function BusFees() {
           ...paymentForm,
           riderType: paymentTarget.riderType,
           riderId: paymentTarget.riderId,
-          busRouteId: selectedRouteId,
+          busRouteId: paymentTarget.routeId ?? selectedRouteId,
           month,
         });
       }
@@ -310,6 +347,34 @@ export default function BusFees() {
   // Reported, not deducted: `amount` is already net of the discount, so the
   // Paid figure and this one are independent readings of the same month.
   const discountsGiven = payments.reduce((sum, p) => sum + (p.discount || 0), 0);
+
+  // Money for the month, over the riders on screen's route(s) — not the search filter.
+  // Receivable = what each rider owes after discount: for someone who has paid, the
+  // fee and discount recorded on their payment; for someone who hasn't, their
+  // current net payable. Balance = receivable - received, so it also picks up
+  // partial payments, not just riders who haven't paid at all.
+  let totalReceivable = 0;
+  let totalReceived = 0;
+  riders.forEach((r) => {
+    const pay = paymentByKey.get(`${r.riderType}-${r.riderId}`);
+    if (pay) {
+      totalReceivable += netPayable(pay.grossFee ?? r.monthlyFee, pay.discount);
+      totalReceived += pay.amount || 0;
+    } else {
+      totalReceivable += r.netPayable || 0;
+    }
+  });
+  const balanceAmount = totalReceivable - totalReceived;
+
+  // Search by admission number, name, class (with section) or father/guardian.
+  // Every word typed must match somewhere, so "ahmed 8" finds an Ahmed in class 8.
+  const searchTokens = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleRiders = searchTokens.length
+    ? riders.filter((r) => {
+        const hay = [r.name, r.admissionNumber, r.classLabel, r.section, r.guardianName, r.routeName].filter(Boolean).join(' ').toLowerCase();
+        return searchTokens.every((t) => hay.includes(t));
+      })
+    : riders;
 
   return (
     <div>
@@ -369,7 +434,10 @@ export default function BusFees() {
           <div className="flex flex-wrap gap-4 mb-6 items-end">
             <div>
               <label className="block text-sm text-slate2 mb-1">Route</label>
-              <select value={selectedRouteId} onChange={(e) => setSelectedRouteId(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white">
+              <select value={selectedRouteId} onChange={(e) => { setSelectedRouteId(e.target.value); setSearch(''); setShowPassengerForm(false); setEditingPassengerId(null); setPassengerForm(emptyPassengerForm); }} className="border border-ink/20 rounded-md px-3 py-2 bg-white">
+                <option value={ALL_ROUTES}>
+                  All routes ({routes.reduce((n, r) => n + r._count.students + r._count.passengers, 0)} riders)
+                </option>
                 {routes.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} ({r._count.students + r._count.passengers} riders)
@@ -380,6 +448,15 @@ export default function BusFees() {
             <div>
               <label className="block text-sm text-slate2 mb-1">Month</label>
               <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="border border-ink/20 rounded-md px-3 py-2 bg-white" />
+            </div>
+            <div>
+              <label className="block text-sm text-slate2 mb-1">Search</label>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Admission no., name, class"
+                className="border border-ink/20 rounded-md px-3 py-2 bg-white w-60"
+              />
             </div>
             {selectedRoute && (
               <div className="pb-2">
@@ -400,6 +477,7 @@ export default function BusFees() {
                 <button onClick={handleDeleteRoute} className="text-xs text-absent hover:underline ml-3">Delete route</button>
               </div>
             )}
+            {selectedRouteId !== ALL_ROUTES && (
             <button
               onClick={() => {
                 if (showPassengerForm) {
@@ -412,6 +490,7 @@ export default function BusFees() {
             >
               {showPassengerForm ? 'Cancel' : '+ Add bus-only passenger'}
             </button>
+            )}
           </div>
 
           {editingRoute && (
@@ -485,12 +564,30 @@ export default function BusFees() {
             </div>
           )}
 
+          {dues && (
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="bg-white border border-ink/10 rounded-lg p-4">
+                <p className="font-display text-3xl text-ink">Rs. {totalReceivable.toLocaleString()}</p>
+                <p className="text-sm text-slate2">Total receivable</p>
+                <p className="text-xs text-slate2 mt-1">{month}, after discounts</p>
+              </div>
+              <div className="bg-white border border-ink/10 rounded-lg p-4">
+                <p className="font-display text-3xl text-present">Rs. {totalReceived.toLocaleString()}</p>
+                <p className="text-sm text-slate2">Total received</p>
+              </div>
+              <div className="bg-white border border-ink/10 rounded-lg p-4">
+                <p className={`font-display text-3xl ${balanceAmount > 0 ? 'text-absent' : 'text-present'}`}>Rs. {balanceAmount.toLocaleString()}</p>
+                <p className="text-sm text-slate2">Balance amount</p>
+              </div>
+            </div>
+          )}
+
           {error && !paymentTarget && !discountTarget && <p className="text-absent text-sm mb-4">{error}</p>}
 
           {paymentTarget && (
             <form onSubmit={handleRecordPayment} className="bg-white border border-ink/10 rounded-lg p-6 mb-6">
               <p className="text-sm text-slate2 mb-4">
-                {editingPaymentId ? 'Editing' : 'Recording'} <span className="font-medium text-ink">{paymentTarget.name}</span>'s bus fee for {month}.
+                {editingPaymentId ? 'Editing' : 'Recording'} <span className="font-medium text-ink">{paymentTarget.name}</span>{paymentTarget.admissionNumber ? ` (Admn No. ${paymentTarget.admissionNumber})` : ''}'s bus fee for {month}.
               </p>
               {error && <p className="text-absent text-sm mb-4">{error}</p>}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
@@ -612,9 +709,12 @@ export default function BusFees() {
             <table className="register-table w-full text-sm">
               <thead>
                 <tr className="border-b border-ink/10 text-left">
+                  <th className="px-4 py-3">Admn No</th>
                   <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Father / Guardian</th>
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Class</th>
+                  {selectedRouteId === ALL_ROUTES && <th className="px-4 py-3">Route</th>}
                   <th className="px-4 py-3">Pickup Point</th>
                   <th className="px-4 py-3">Discount</th>
                   <th className="px-4 py-3">{month} Status</th>
@@ -622,21 +722,30 @@ export default function BusFees() {
                 </tr>
               </thead>
               <tbody>
-                {riders.length === 0 ? (
-                  <tr><td className="px-4 py-6 text-slate2" colSpan={7}>No riders on this route yet. Assign students from the Students page, or add a bus-only passenger above.</td></tr>
+                {visibleRiders.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-slate2" colSpan={selectedRouteId === ALL_ROUTES ? 10 : 9}>
+                      {riders.length === 0
+                        ? 'No riders yet. Assign students from the Students page, or add a bus-only passenger above.'
+                        : 'No riders match your search.'}
+                    </td>
+                  </tr>
                 ) : (
-                  riders.map((r) => {
+                  visibleRiders.map((r) => {
                     const key = `${r.riderType}-${r.riderId}`;
                     const paid = paidKeys.has(key);
                     return (
                       <tr key={key} className="border-b border-ink/5 last:border-0">
+                        <td className="px-4 py-3 text-slate2 whitespace-nowrap">{r.admissionNumber || '—'}</td>
                         <td className="px-4 py-3">{r.name}</td>
+                        <td className="px-4 py-3 text-slate2">{r.guardianName || '—'}</td>
                         <td className="px-4 py-3">
                           <span className={`text-xs px-2 py-1 rounded-full font-medium ${r.riderType === 'STUDENT' ? 'bg-ink/10 text-ink' : 'bg-brass/10 text-brass-dark'}`}>
                             {r.riderType === 'STUDENT' ? 'Enrolled' : 'Bus only'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate2">{r.classLabel}</td>
+                        <td className="px-4 py-3 text-slate2">{r.classLabel}{r.section ? ` ${r.section}` : ''}</td>
+                        {selectedRouteId === ALL_ROUTES && <td className="px-4 py-3 text-slate2 whitespace-nowrap">{r.routeName}</td>}
                         <td className="px-4 py-3 text-slate2">{r.pickupPoint || '—'}</td>
                         <td className="px-4 py-3">
                           {r.busFeeDiscount > 0 ? (
