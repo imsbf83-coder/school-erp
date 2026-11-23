@@ -172,7 +172,7 @@ export default function Attendance() {
       />
 
       {showHolidays && (
-        <div className="bg-white border border-ink/10 rounded-lg p-6 mb-8">
+        <div className="bg-white border border-ink/10 rounded-lg p-4 sm:p-6 mb-8">
           <p className="text-sm text-slate2 mb-4">
             Saturdays and Sundays are always treated as holidays automatically. Anything else — occasional
             closures, summer vacation, Eid and other breaks — only needs to be marked here <em>once</em>; it
@@ -184,7 +184,7 @@ export default function Attendance() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
             <form onSubmit={handleAddHoliday} className="space-y-3">
               <p className="text-sm font-medium text-ink">Single day (e.g. Independence Day)</p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <input
                   required
                   type="date"
@@ -197,7 +197,7 @@ export default function Attendance() {
                   placeholder="Reason (e.g. Eid-ul-Fitr)"
                   value={holidayForm.name}
                   onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })}
-                  className="flex-1 border border-ink/20 rounded-md px-3 py-2 bg-white text-sm"
+                  className="flex-1 min-w-[10rem] border border-ink/20 rounded-md px-3 py-2 bg-white text-sm"
                 />
               </div>
               <button
@@ -211,7 +211,7 @@ export default function Attendance() {
 
             <form onSubmit={handleAddRange} className="space-y-3">
               <p className="text-sm font-medium text-ink">Date range (e.g. summer vacation)</p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <input
                   required
                   type="date"
@@ -376,14 +376,14 @@ export default function Attendance() {
             </p>
           )}
 
-          <div className="bg-white border border-ink/10 rounded-lg overflow-hidden mb-4">
+          <div className="bg-white border border-ink/10 rounded-lg overflow-x-auto mb-4">
             <table className="register-table w-full text-sm">
               <thead>
                 <tr className="border-b border-ink/10 text-left">
-                  <th className="px-4 py-3">Roll</th>
-                  <th className="px-4 py-3">Name</th>
-                  {showSectionCol && <th className="px-4 py-3">Section</th>}
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-2 sm:px-4 py-3">Roll</th>
+                  <th className="px-2 sm:px-4 py-3">Name</th>
+                  {showSectionCol && <th className="px-2 sm:px-4 py-3">Section</th>}
+                  <th className="px-2 sm:px-4 py-3">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -398,16 +398,16 @@ export default function Attendance() {
                 ) : (
                   rows.map((r) => (
                     <tr key={r.studentId} className="border-b border-ink/5 last:border-0">
-                      <td className="px-4 py-3 font-mono text-xs">{r.rollNumber || '—'}</td>
-                      <td className="px-4 py-3">{r.name}</td>
-                      {showSectionCol && <td className="px-4 py-3 text-slate2">{r.section || '—'}</td>}
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1.5">
+                      <td className="px-2 sm:px-4 py-3 font-mono text-xs align-top sm:align-middle">{r.rollNumber || '—'}</td>
+                      <td className="px-2 sm:px-4 py-3 align-top sm:align-middle min-w-[7rem]">{r.name}</td>
+                      {showSectionCol && <td className="px-2 sm:px-4 py-3 text-slate2 align-top sm:align-middle">{r.section || '—'}</td>}
+                      <td className="px-2 sm:px-4 py-3">
+                        <div className="flex flex-wrap gap-1.5 min-w-[9.5rem]">
                           {STATUSES.map((s) => (
                             <button
                               key={s}
                               onClick={() => setStatus(r.studentId, s)}
-                              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                              className={`text-xs px-3 py-1.5 sm:px-2.5 sm:py-1 rounded-full border transition-colors ${
                                 r.status === s ? STATUS_STYLES[s] + ' border-transparent' : 'border-ink/20 text-slate2 hover:bg-paper'
                               }`}
                             >
@@ -423,7 +423,7 @@ export default function Attendance() {
             </table>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="sticky bottom-0 z-10 -mx-4 md:-mx-8 px-4 md:px-8 py-3 bg-paper/95 backdrop-blur border-t border-ink/10 flex flex-wrap items-center gap-x-4 gap-y-2">
             <button
               onClick={handleSave}
               disabled={saving || rows.length === 0}
