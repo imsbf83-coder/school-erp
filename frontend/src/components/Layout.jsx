@@ -24,6 +24,7 @@ const modules = [
   { to: '/staff', label: 'Staff', accent: '#2E6E8E', moduleKey: 'STAFF' },
   { to: '/bus-fees', label: 'Bus Fee Collection', accent: '#C0632E', moduleKey: 'BUS' },
   { to: '/transport-expenses', label: 'Transport Expenses', accent: '#8A5A2E', moduleKey: 'BUS' },
+  { to: '/timetable', label: 'Timetable', accent: '#3E7C7B', moduleKey: 'TIMETABLE' },
   { to: '/reports', label: 'Reports', accent: '#5B6B7C', moduleKey: null },
 ];
 
