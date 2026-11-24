@@ -191,6 +191,8 @@ model Class {
   students     Student[]
   examClasses  ExamClass[]
   teacherLinks TeacherClass[]
+
+  timetableSchedules TimetableScheduleClass[]
 }
 
 // ---------- HOLIDAYS ----------
@@ -709,4 +711,57 @@ model Staff {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ---------- TIMETABLE ----------
+
+// A "period schedule" is one daily bell pattern (assembly, periods, break...)
+// that applies to a set of classes on a set of weekdays. Example from the
+// 2026-27 draft: "Classes VI-VIII, Mon-Thu" (7 periods + break) vs
+// "All classes, Friday" (6 periods + break). The weekly grid entries
+// (class + day + period -> subject + teacher) are added in the next step and
+// are keyed by periodNumber, so they stay valid when a period's time changes.
+model TimetableSchedule {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+  // Weekdays this schedule runs on, as CSV of ISO weekday numbers:
+  // 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri  (e.g. "1,2,3,4")
+  days String
+
+  classes TimetableScheduleClass[]
+  slots   TimetableSlot[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TimetableScheduleClass {
+  id         Int               @id @default(autoincrement())
+  scheduleId Int
+  schedule   TimetableSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  classId    Int
+  class      Class             @relation(fields: [classId], references: [id])
+
+  @@unique([scheduleId, classId])
+  @@index([classId])
+}
+
+model TimetableSlot {
+  id         Int               @id @default(autoincrement())
+  scheduleId Int
+  schedule   TimetableSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  // Order within the day, starting at 1
+  position   Int
+  // One of: PERIOD, BREAK, ACTIVITY (assembly, etc. - not a teachable period)
+  kind       String
+  // 1, 2, 3... only for kind = PERIOD (assigned automatically in order)
+  periodNumber Int?
+  label      String
+  // 24-hour "HH:MM"
+  startTime  String
+  endTime    String
+  note       String?
+
+  @@unique([scheduleId, position])
+  @@index([scheduleId])
 }
