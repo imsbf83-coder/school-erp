@@ -14,6 +14,7 @@ const staffRoutes = require('./routes/staff');
 const busRoutes = require('./routes/bus');
 const staffAccessRoutes = require('./routes/staffAccess');
 const meRoutes = require('./routes/me');
+const timetableRoutes = require('./routes/timetable');
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use('/api/staff', staffRoutes);
 app.use('/api/bus', busRoutes);
 app.use('/api/staff-access', staffAccessRoutes);
 app.use('/api/me', meRoutes);
+app.use('/api/timetable', timetableRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
