@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import client from '../../api/client';
 import { SCHOOL_INFO } from '../../config/schoolInfo';
+import printElement from './printElement';
 
 const DAYS = [
   { n: 1, short: 'Mon' },
@@ -54,6 +55,7 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
   const [cellError, setCellError] = useState('');
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const printRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -285,7 +287,7 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
               {usedTeachers.map((t) => <option key={t.id} value={t.id}>{t.fullName}</option>)}
             </select>
           </div>
-          <button onClick={() => window.print()} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+          <button onClick={() => printElement(printRef.current, `Class-wise timetable ${year}`)} disabled={groups.length === 0} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
             Print
           </button>
           {canEdit && entries.length === 0 && schedules.length > 0 && (
@@ -309,7 +311,7 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
           No period schedules are set up yet.{canEdit ? ' Open “Period setup” and create them first.' : ''}
         </p>
       ) : (
-        <div className="print-area">
+        <div className="print-area" ref={printRef}>
           {groups.map((g, gi) => {
             const slots = g.schedule.slots.filter((s) => s.kind !== 'ACTIVITY');
             const activities = g.schedule.slots.filter((s) => s.kind === 'ACTIVITY');

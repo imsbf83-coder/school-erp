@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import client from '../../api/client';
 import { SCHOOL_INFO } from '../../config/schoolInfo';
+import printElement from './printElement';
 
 // [1,2,3,5] -> "1-3,5"  (1 = Monday ... 5 = Friday)
 function compressDays(days) {
@@ -22,14 +23,13 @@ function sectionLabel(cls, section) {
   return `${m ? m[0] : cls.name}${section}`;
 }
 
-// One cell can hold several classes. Entries for the same section and subject
-// are merged first (so 6A H/G on Mon, Tue, Wed and Fri becomes one item with
-// days 1-3,5). Each cell is then shown as two lines, e.g.
-//   6A, H/G
-//   1-3,5
-// With several classes the sections, subjects and days line up in order:
-//   6C-8B-8A, LIB
-//   1,2,3
+// Turns the entries of one teacher in one period into the lines of a cell.
+// Entries for the same section and subject are merged first (6A H/G on Mon,
+// Tue, Wed and Fri becomes one item with days 1-3,5).
+//   one class:   6A, H/G          (two lines: section + subject, then days)
+//                1-3,5
+//   many classes: 8C H/G 1-2,5    (one line per class)
+//                 6C URDU 4
 function formatCell(items) {
   const merged = new Map();
   for (const it of items) {
@@ -37,14 +37,9 @@ function formatCell(items) {
     if (!merged.has(k)) merged.set(k, { label: it.label, subject: it.subject, days: new Set() });
     it.days.forEach((d) => merged.get(k).days.add(d));
   }
-  const list = Array.from(merged.values()).map((x) => ({ ...x, days: Array.from(x.days) }));
-  list.sort((a, b) => Math.min(...a.days) - Math.min(...b.days) || a.label.localeCompare(b.label));
-  const subjects = list.map((x) => x.subject);
-  const sameSubject = subjects.every((x) => x === subjects[0]);
-  return {
-    head: `${list.map((x) => x.label).join('-')}, ${sameSubject ? subjects[0] : subjects.join('-')}`,
-    days: list.map((x) => compressDays(x.days)).join(','),
-  };
+  const list = Array.from(merged.values()).map((x) => ({ ...x, days: compressDays(Array.from(x.days)), first: Math.min(...x.days) }));
+  list.sort((a, b) => a.first - b.first || a.label.localeCompare(b.label));
+  return list;
 }
 
 export default function TeacherwiseGrid({ year, onYearChange }) {
@@ -54,6 +49,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const printRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -143,7 +139,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
             className="w-28 border border-ink/20 rounded-md px-2 py-1.5 bg-white text-sm"
           />
         </div>
-        <button onClick={() => window.print()} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+        <button onClick={() => printElement(printRef.current, `Teacher-wise timetable ${year}`)} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
           Print
         </button>
         <p className="text-xs text-slate2 basis-full">
@@ -154,7 +150,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
       {rows.length === 0 ? (
         <p className="text-slate2 text-sm">No teaching entries yet. Fill in the Class-wise timetable first.</p>
       ) : (
-        <div className="print-area">
+        <div className="print-area" ref={printRef}>
           <div className="mb-3">
             <p className="font-display text-lg text-ink uppercase">{SCHOOL_INFO.name}</p>
             <p className="font-display text-base text-ink">TIME TABLE {year} (TEACHERWISE)</p>
@@ -188,12 +184,19 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
                       const f = items && items.length ? formatCell(items) : null;
                       return (
                         <td key={s.id} className="border border-ink/30 px-1.5 py-1 text-center align-middle min-w-[5.5rem]">
-                          {f && (
+                          {f && f.length === 1 && (
                             <>
-                              <div className="font-semibold text-xs leading-tight">{f.head}</div>
-                              <div className="font-mono text-[11px] text-slate2 leading-tight">{f.days}</div>
+                              <div className="font-semibold text-xs leading-tight">{f[0].label}, {f[0].subject}</div>
+                              <div className="font-mono text-[11px] text-slate2 leading-tight">{f[0].days}</div>
                             </>
                           )}
+                          {f && f.length > 1 &&
+                            f.map((x) => (
+                              <div key={`${x.label}|${x.subject}`} className="text-xs leading-snug whitespace-nowrap">
+                                <span className="font-semibold">{x.label}</span> {x.subject}{' '}
+                                <span className="font-mono text-[11px] text-slate2">{x.days}</span>
+                              </div>
+                            ))}
                         </td>
                       );
                     })}
@@ -205,7 +208,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
 
           <p className="text-xs text-slate2 mt-2">
             Number under each name = periods per week. Days: 1 = Monday ... 5 = Friday. When a cell lists
-            several classes, the sections and days line up in order.
+            several classes, each class has its own line: section, subject, days.
           </p>
         </div>
       )}
