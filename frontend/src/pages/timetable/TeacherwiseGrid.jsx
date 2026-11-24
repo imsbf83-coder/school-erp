@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import client from '../../api/client';
 import { SCHOOL_INFO } from '../../config/schoolInfo';
+import printElement from './printElement';
 
 // [1,2,3,5] -> "1-3,5"  (1 = Monday ... 5 = Friday)
 function compressDays(days) {
@@ -48,6 +49,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const printRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -137,7 +139,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
             className="w-28 border border-ink/20 rounded-md px-2 py-1.5 bg-white text-sm"
           />
         </div>
-        <button onClick={() => window.print()} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+        <button onClick={() => printElement(printRef.current, `Teacher-wise timetable ${year}`)} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
           Print
         </button>
         <p className="text-xs text-slate2 basis-full">
@@ -148,7 +150,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
       {rows.length === 0 ? (
         <p className="text-slate2 text-sm">No teaching entries yet. Fill in the Class-wise timetable first.</p>
       ) : (
-        <div className="print-area">
+        <div className="print-area" ref={printRef}>
           <div className="mb-3">
             <p className="font-display text-lg text-ink uppercase">{SCHOOL_INFO.name}</p>
             <p className="font-display text-base text-ink">TIME TABLE {year} (TEACHERWISE)</p>
