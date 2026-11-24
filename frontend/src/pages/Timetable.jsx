@@ -1,14 +1,53 @@
+import { useState } from 'react';
 import PageHeader from '../components/PageHeader';
+import { useAuth } from '../context/AuthContext';
+import TimetableGrid from './timetable/TimetableGrid';
+import TeacherwiseGrid from './timetable/TeacherwiseGrid';
 import PeriodSetup from './timetable/PeriodSetup';
 
-// The Timetable module is built in steps. Step 1 (this file) is the period
-// setup: the daily bell schedules. The weekly class grid and the teacher view
-// get added as tabs next to "Period setup".
+// Academic year label for the printed heading, e.g. "2026-27". The new year
+// starts in April.
+function defaultYear() {
+  const now = new Date();
+  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+}
+
 export default function Timetable() {
+  const { user, hasModule } = useAuth();
+  // Same rule as the API: ADMIN, or anyone granted the TIMETABLE module.
+  const canEdit = user?.role === 'ADMIN' || hasModule('TIMETABLE');
+  const [tab, setTab] = useState('class');
+  const [year, setYear] = useState(defaultYear());
+
+  const tabs = [
+    ['class', 'Class-wise'],
+    ['teacher', 'Teacher-wise'],
+    ...(canEdit ? [['setup', 'Period setup']] : []),
+  ];
+
   return (
     <div>
-      <PageHeader eyebrow="Module 08" title="Timetable" />
-      <PeriodSetup />
+      <div className="print:hidden">
+        <PageHeader eyebrow="Module 08" title="Timetable" />
+        <div className="flex flex-wrap gap-2 mb-6">
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`text-sm px-4 py-2 rounded-md border ${
+                tab === key ? 'bg-ink text-paper border-transparent' : 'border-ink/20 hover:bg-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === 'class' && <TimetableGrid canEdit={canEdit} year={year} onYearChange={setYear} />}
+      {tab === 'teacher' && <TeacherwiseGrid year={year} onYearChange={setYear} />}
+      {tab === 'setup' && canEdit && <PeriodSetup />}
     </div>
   );
 }
