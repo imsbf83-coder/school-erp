@@ -452,6 +452,22 @@ router.put(
       });
     }
 
+    // Rows with the same subject and teacher are one entry: join their days
+    // (e.g. H/G Mon-Wed and H/G Fri by the same teacher -> H/G 1-3,5).
+    const mergedRows = new Map();
+    for (const e of entries) {
+      const k = `${e.subject}|${e.teacherId}`;
+      if (mergedRows.has(k)) {
+        const m = mergedRows.get(k);
+        m.days = Array.from(new Set([...m.days.split(',').map(Number), ...e.days.split(',').map(Number)]))
+          .sort((a, b) => a - b)
+          .join(',');
+      } else {
+        mergedRows.set(k, { ...e });
+      }
+    }
+    entries.splice(0, entries.length, ...mergedRows.values());
+
     // Teacher clash: the same teacher cannot be in two classes at overlapping
     // times on the same day. Compared by real clock time, so a 60-minute
     // period for IX-X is checked against VI-VIII periods that overlap it.
