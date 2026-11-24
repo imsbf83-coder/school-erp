@@ -56,6 +56,8 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const printRef = useRef(null);
+  const [printDialog, setPrintDialog] = useState(false);
+  const [printChoice, setPrintChoice] = useState('all');
 
   useEffect(() => {
     load();
@@ -233,6 +235,33 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
     }
   }
 
+  // Print everything, or just one class. The page is copied first and the
+  // other classes' rows are removed from the copy, so the screen is untouched.
+  function doPrint() {
+    const root = printRef.current;
+    if (!root) return;
+    const clone = root.cloneNode(true);
+    let title = `Class-wise timetable ${year}`;
+    if (printChoice !== 'all') {
+      const cls = classes.find((c) => String(c.id) === String(printChoice));
+      clone.querySelectorAll('tr[data-class-id]').forEach((tr) => {
+        if (tr.dataset.classId !== String(printChoice)) tr.remove();
+      });
+      clone.querySelectorAll('[data-group]').forEach((g) => {
+        if (!g.querySelector('tr[data-class-id]')) g.remove();
+      });
+      clone.querySelectorAll('.break-after-page').forEach((g) => g.classList.remove('break-after-page'));
+      const num = cls ? String(cls.name).match(/\d+/) : null;
+      const label = cls ? (num ? `CLASS ${num[0]}` : String(cls.name).toUpperCase()) : '';
+      clone.querySelectorAll('[data-print-title]').forEach((p) => {
+        p.textContent = `${p.textContent} - ${label}`;
+      });
+      title = `Timetable ${label} ${year}`;
+    }
+    setPrintDialog(false);
+    printElement(clone, title);
+  }
+
   async function handleClear() {
     if (!window.confirm('Delete EVERY entry in the timetable? The period schedules stay. This cannot be undone.')) return;
     try {
@@ -287,7 +316,11 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
               {usedTeachers.map((t) => <option key={t.id} value={t.id}>{t.fullName}</option>)}
             </select>
           </div>
-          <button onClick={() => printElement(printRef.current, `Class-wise timetable ${year}`)} disabled={groups.length === 0} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+          <button
+            onClick={() => { setPrintChoice('all'); setPrintDialog(true); }}
+            disabled={groups.length === 0}
+            className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white disabled:opacity-50"
+          >
             Print
           </button>
           {canEdit && entries.length === 0 && schedules.length > 0 && (
@@ -321,10 +354,10 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
             );
 
             return (
-              <div key={g.schedule.id} className={`mb-10 ${gi < groups.length - 1 ? 'break-after-page' : ''}`}>
+              <div key={g.schedule.id} data-group="1" className={`mb-10 ${gi < groups.length - 1 ? 'break-after-page' : ''}`}>
                 <div className="mb-3">
                   <p className="font-display text-lg text-ink uppercase">{SCHOOL_INFO.name}</p>
-                  <p className="font-display text-base text-ink">TIME TABLE {year}</p>
+                  <p data-print-title="1" className="font-display text-base text-ink">TIME TABLE {year}</p>
                   <div className="text-sm mt-1">
                     {activities.map((a) => (
                       <p key={a.id}>
@@ -367,7 +400,7 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
                           .map((x) => x.trim())
                           .filter(Boolean)
                           .map((section) => (
-                            <tr key={`${cls.id}-${section}`}>
+                            <tr key={`${cls.id}-${section}`} data-class-id={cls.id}>
                               <th className="border border-ink/30 px-2 py-2 text-left font-semibold whitespace-nowrap align-middle">
                                 {sectionLabel(cls, section)}
                               </th>
@@ -437,6 +470,34 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ---------- print choice ---------- */}
+      {printDialog && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-white rounded-lg w-full max-w-sm p-4 sm:p-6">
+            <h2 className="font-display text-xl text-ink mb-4">Print timetable</h2>
+            <label className="block text-sm text-slate2 mb-1">What do you want to print?</label>
+            <select
+              value={printChoice}
+              onChange={(e) => setPrintChoice(e.target.value)}
+              className="w-full border border-ink/20 rounded-md px-3 py-2 bg-white text-sm"
+            >
+              <option value="all">All classes</option>
+              {groups.flatMap((g) => g.classes).map((c) => (
+                <option key={c.id} value={c.id}>{c.name} only (all sections)</option>
+              ))}
+            </select>
+            <div className="flex flex-wrap gap-3 mt-6">
+              <button onClick={doPrint} className="text-sm px-5 py-2.5 rounded-md bg-ink text-paper hover:bg-ink-light">
+                Print
+              </button>
+              <button onClick={() => setPrintDialog(false)} className="text-sm px-5 py-2.5 rounded-md border border-ink/20 hover:bg-paper">
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
