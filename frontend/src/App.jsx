@@ -11,6 +11,7 @@ import BusFees from './pages/BusFees';
 import BusReports from './pages/BusReports';
 import TransportExpenses from './pages/TransportExpenses';
 import Reports from './pages/Reports';
+import Timetable from './pages/Timetable';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
       <Route path="/bus-fees" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusFees /></ProtectedRoute>} />
       <Route path="/bus-reports" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusReports /></ProtectedRoute>} />
       <Route path="/transport-expenses" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT']} moduleKey="BUS"><TransportExpenses /></ProtectedRoute>} />
+      <Route path="/timetable" element={<ProtectedRoute roles={['ADMIN']} moduleKey="TIMETABLE"><Timetable /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     </Routes>
   );
