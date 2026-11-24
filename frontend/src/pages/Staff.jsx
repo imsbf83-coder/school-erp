@@ -49,6 +49,7 @@ const MODULE_LABELS = {
   CLASSES: 'Classes',
   GRADE_SCALES: 'Grading Scale',
   HOLIDAYS: 'Holidays',
+  TIMETABLE: 'Timetable',
 };
 
 export default function Staff() {
