@@ -324,4 +324,274 @@ router.post(
   })
 );
 
+// ======================= WEEKLY GRID (entries) =======================
+
+const DRAFT = require('../data/timetableDraft2026');
+
+function normKey(name) {
+  return String(name || '').toUpperCase().replace(/[\s.]/g, '');
+}
+
+function shapeEntry(e) {
+  return {
+    id: e.id,
+    classId: e.classId,
+    section: e.section,
+    periodNumber: e.periodNumber,
+    subject: e.subject,
+    days: e.days.split(',').filter(Boolean).map(Number),
+    teacherId: e.teacherId,
+  };
+}
+
+function classLabel(cls, section) {
+  const m = String(cls.name).match(/\d+/);
+  return `${m ? m[0] : cls.name}-${section}`;
+}
+
+// classId -> weekday -> { periodNumber: [startMinutes, endMinutes] }
+async function loadScheduleMap() {
+  const schedules = await prisma.timetableSchedule.findMany({ include: { slots: true, classes: true } });
+  const map = new Map();
+  for (const s of schedules) {
+    const days = s.days.split(',').filter(Boolean).map(Number);
+    const periods = {};
+    for (const sl of s.slots) {
+      if (sl.kind === 'PERIOD') periods[sl.periodNumber] = [toMinutes(sl.startTime), toMinutes(sl.endTime)];
+    }
+    for (const c of s.classes) {
+      if (!map.has(c.classId)) map.set(c.classId, {});
+      for (const d of days) map.get(c.classId)[d] = periods;
+    }
+  }
+  return map;
+}
+
+// GET /api/timetable/entries
+router.get(
+  '/entries',
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.timetableEntry.findMany({
+      orderBy: [{ classId: 'asc' }, { section: 'asc' }, { periodNumber: 'asc' }, { id: 'asc' }],
+    });
+    res.json(rows.map(shapeEntry));
+  })
+);
+
+// GET /api/timetable/teachers - the people who teach in the timetable
+router.get(
+  '/teachers',
+  asyncHandler(async (req, res) => {
+    const rows = await prisma.timetableTeacher.findMany({ orderBy: { fullName: 'asc' } });
+    res.json(rows);
+  })
+);
+
+// Finds the teacher a typed name refers to (matching either the full or the
+// short name, ignoring spaces, dots and case) or creates a new one.
+async function resolveTeacher(typed, cache) {
+  const name = String(typed || '').trim().toUpperCase();
+  if (!name) return null;
+  const key = normKey(name);
+  let t = cache.find((x) => normKey(x.fullName) === key || normKey(x.shortName) === key);
+  if (!t) {
+    t = await prisma.timetableTeacher.create({ data: { fullName: name, shortName: name } });
+    cache.push(t);
+  }
+  return t;
+}
+
+// PUT /api/timetable/cell
+// { classId, section, periodNumber, entries: [{ subject, days: [1..5], teacherName }] }
+// teacherName is typed text; it is matched to (or creates) a teacher.
+// Replaces everything in that one cell (class + section + period).
+router.put(
+  '/cell',
+  canEdit,
+  asyncHandler(async (req, res) => {
+    const classId = Number(req.body.classId);
+    const section = String(req.body.section || '').trim();
+    const periodNumber = Number(req.body.periodNumber);
+    const rawEntries = Array.isArray(req.body.entries) ? req.body.entries : [];
+
+    const cls = await prisma.class.findUnique({ where: { id: classId } });
+    if (!cls) return res.status(404).json({ error: 'Class not found.' });
+    const sections = String(cls.sections || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!sections.includes(section)) return res.status(400).json({ error: 'That section does not exist for this class.' });
+    if (!Number.isInteger(periodNumber) || periodNumber < 1) return res.status(400).json({ error: 'Invalid period.' });
+
+    const map = await loadScheduleMap();
+    const classDays = map.get(classId) || {};
+
+    const teacherCache = await prisma.timetableTeacher.findMany();
+    const entries = [];
+    const usedDays = new Set();
+    for (const e of rawEntries) {
+      const subject = String(e.subject || '').trim().toUpperCase();
+      if (!subject) return res.status(400).json({ error: 'Every entry needs a subject.' });
+      const days = Array.from(new Set((Array.isArray(e.days) ? e.days : []).map(Number))).sort();
+      if (!days.length || days.some((d) => !Number.isInteger(d) || d < 1 || d > 5)) {
+        return res.status(400).json({ error: `Pick at least one day for ${subject}.` });
+      }
+      for (const d of days) {
+        if (!classDays[d] || !classDays[d][periodNumber]) {
+          return res.status(400).json({ error: `${DAY_NAMES[d]} has no period ${periodNumber} for this class.` });
+        }
+        if (usedDays.has(d)) {
+          return res.status(400).json({ error: `${DAY_NAMES[d]} is used by two entries in this period.` });
+        }
+        usedDays.add(d);
+      }
+      entries.push({
+        classId,
+        section,
+        periodNumber,
+        subject,
+        days: days.join(','),
+        teacherId: (await resolveTeacher(e.teacherName, teacherCache))?.id ?? null,
+      });
+    }
+
+    // Teacher clash: the same teacher cannot be in two classes at overlapping
+    // times on the same day. Compared by real clock time, so a 60-minute
+    // period for IX-X is checked against VI-VIII periods that overlap it.
+    const classes = await prisma.class.findMany();
+    const classById = new Map(classes.map((c) => [c.id, c]));
+    const others = (await prisma.timetableEntry.findMany()).filter(
+      (o) => !(o.classId === classId && o.section === section && o.periodNumber === periodNumber)
+    );
+    const clashes = [];
+    for (const e of entries) {
+      if (!e.teacherId) continue;
+      const teacher = teacherCache.find((t) => t.id === e.teacherId);
+      const myDays = e.days.split(',').map(Number);
+      for (const o of others) {
+        if (o.teacherId !== e.teacherId) continue;
+        const oDays = o.days.split(',').map(Number);
+        const clashDays = [];
+        for (const d of myDays) {
+          if (!oDays.includes(d)) continue;
+          const mine = classDays[d]?.[periodNumber];
+          const theirs = map.get(o.classId)?.[d]?.[o.periodNumber];
+          if (mine && theirs && mine[0] < theirs[1] && theirs[0] < mine[1]) clashDays.push(d);
+        }
+        if (clashDays.length) {
+          const oc = classById.get(o.classId);
+          clashes.push(
+            `${teacher.fullName} is already teaching ${oc ? classLabel(oc, o.section) : 'another class'} ` +
+              `(period ${o.periodNumber}, ${o.subject}) on ${clashDays.map((d) => DAY_NAMES[d]).join(', ')} at the same time.`
+          );
+        }
+      }
+    }
+    if (clashes.length) return res.status(409).json({ error: Array.from(new Set(clashes)).join(' ') });
+
+    await prisma.$transaction([
+      prisma.timetableEntry.deleteMany({ where: { classId, section, periodNumber } }),
+      ...(entries.length ? [prisma.timetableEntry.createMany({ data: entries })] : []),
+    ]);
+    const saved = await prisma.timetableEntry.findMany({
+      where: { classId, section, periodNumber },
+      orderBy: { id: 'asc' },
+    });
+    res.json(saved.map(shapeEntry));
+  })
+);
+
+// POST /api/timetable/import-draft
+// One-time load of the 2026-27 draft timetable (147 entries). Only runs when
+// the grid is empty. Days that fall on a period the class does not have that
+// day (e.g. period 7 on Friday) are dropped and reported back.
+router.post(
+  '/import-draft',
+  canEdit,
+  asyncHandler(async (req, res) => {
+    if ((await prisma.timetableEntry.count()) > 0) {
+      return res.status(409).json({ error: 'The timetable already has entries. Clear it first if you want to re-import.' });
+    }
+    const map = await loadScheduleMap();
+    if (!map.size) return res.status(400).json({ error: 'Create the period schedules first (Period setup).' });
+
+    const classes = await prisma.class.findMany();
+    const classByNum = new Map();
+    for (const c of classes) {
+      const m = String(c.name).match(/\d+/);
+      if (m && !classByNum.has(Number(m[0]))) classByNum.set(Number(m[0]), c);
+    }
+
+    // teachers first, so entries can point at them
+    const teacherIds = new Map();
+    for (const t of DRAFT.teachers) {
+      const row = await prisma.timetableTeacher.upsert({
+        where: { fullName: t.fullName },
+        update: {},
+        create: { fullName: t.fullName, shortName: t.shortName },
+      });
+      teacherIds.set(t.fullName, row.id);
+    }
+
+    const rows = [];
+    const dropped = [];
+    const missingClasses = new Set();
+    const touchedClasses = new Map(); // classId -> new sections CSV
+    const addedSections = [];
+
+    for (const e of DRAFT.entries) {
+      const [numStr, secRaw] = e.sec.split('-');
+      const cls = classByNum.get(Number(numStr));
+      if (!cls) {
+        missingClasses.add(numStr);
+        continue;
+      }
+      const existing = String(cls.sections || '').split(',').map((s) => s.trim()).filter(Boolean);
+      let section = existing.find((s) => s.toLowerCase() === secRaw.toLowerCase());
+      if (!section) {
+        section = secRaw;
+        existing.push(secRaw);
+        cls.sections = existing.join(',');
+        touchedClasses.set(cls.id, cls.sections);
+        addedSections.push(`${cls.name} ${secRaw}`);
+      }
+
+      const classDays = map.get(cls.id) || {};
+      const valid = e.days.filter((d) => classDays[d] && classDays[d][e.period]);
+      const bad = e.days.filter((d) => !valid.includes(d));
+      if (bad.length) {
+        dropped.push(`${e.sec} period ${e.period} ${e.subject}: ${bad.map((d) => DAY_NAMES[d]).join(', ')} (that class has no such period that day)`);
+      }
+      if (!valid.length) continue;
+      rows.push({
+        classId: cls.id,
+        section,
+        periodNumber: e.period,
+        subject: e.subject,
+        days: valid.join(','),
+        teacherId: teacherIds.get(e.teacher) ?? null,
+      });
+    }
+
+    await prisma.$transaction([
+      ...Array.from(touchedClasses).map(([id, sections]) => prisma.class.update({ where: { id }, data: { sections } })),
+      prisma.timetableEntry.createMany({ data: rows }),
+    ]);
+
+    res.status(201).json({
+      imported: rows.length,
+      dropped,
+      addedSections: Array.from(new Set(addedSections)),
+      missingClasses: Array.from(missingClasses),
+    });
+  })
+);
+
+// DELETE /api/timetable/entries  - clears the whole weekly grid (schedules stay)
+router.delete(
+  '/entries',
+  canEdit,
+  asyncHandler(async (req, res) => {
+    const r = await prisma.timetableEntry.deleteMany({});
+    res.json({ deleted: r.count });
+  })
+);
+
 module.exports = router;
