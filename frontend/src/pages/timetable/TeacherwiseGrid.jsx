@@ -22,19 +22,23 @@ function sectionLabel(cls, section) {
   return `${m ? m[0] : cls.name}${section}`;
 }
 
-// One cell can hold several classes. Like the printed draft, the sections,
-// subjects and days of a cell line up in order, e.g.
-//   6C-8B-8A / LIB / 1,2,3     (6C on Mon, 8B on Tue, 8A on Wed)
-//   6B-8A / H/G-CS / 1-3,4     (6B does H/G Mon-Wed, 8A does CS on Thu)
+// Turns the entries of one teacher in one period into the lines of a cell.
+// Entries for the same section and subject are merged first (6A H/G on Mon,
+// Tue, Wed and Fri becomes one item with days 1-3,5).
+//   one class:   6A, H/G          (two lines: section + subject, then days)
+//                1-3,5
+//   many classes: 8C H/G 1-2,5    (one line per class)
+//                 6C URDU 4
 function formatCell(items) {
-  const sorted = [...items].sort((a, b) => Math.min(...a.days) - Math.min(...b.days) || a.label.localeCompare(b.label));
-  const subjects = sorted.map((x) => x.subject);
-  const sameSubject = subjects.every((x) => x === subjects[0]);
-  return {
-    sections: sorted.map((x) => x.label).join('-'),
-    subjects: sameSubject ? subjects[0] : subjects.join('-'),
-    days: sorted.map((x) => compressDays(x.days)).join(','),
-  };
+  const merged = new Map();
+  for (const it of items) {
+    const k = `${it.label}|${it.subject}`;
+    if (!merged.has(k)) merged.set(k, { label: it.label, subject: it.subject, days: new Set() });
+    it.days.forEach((d) => merged.get(k).days.add(d));
+  }
+  const list = Array.from(merged.values()).map((x) => ({ ...x, days: compressDays(Array.from(x.days)), first: Math.min(...x.days) }));
+  list.sort((a, b) => a.first - b.first || a.label.localeCompare(b.label));
+  return list;
 }
 
 export default function TeacherwiseGrid({ year, onYearChange }) {
@@ -178,13 +182,19 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
                       const f = items && items.length ? formatCell(items) : null;
                       return (
                         <td key={s.id} className="border border-ink/30 px-1.5 py-1 text-center align-middle min-w-[5.5rem]">
-                          {f && (
+                          {f && f.length === 1 && (
                             <>
-                              <div className="text-[11px] leading-tight">{f.sections}</div>
-                              <div className="font-semibold text-xs leading-tight">{f.subjects}</div>
-                              <div className="font-mono text-[10px] text-slate2 leading-tight">{f.days}</div>
+                              <div className="font-semibold text-xs leading-tight">{f[0].label}, {f[0].subject}</div>
+                              <div className="font-mono text-[11px] text-slate2 leading-tight">{f[0].days}</div>
                             </>
                           )}
+                          {f && f.length > 1 &&
+                            f.map((x) => (
+                              <div key={`${x.label}|${x.subject}`} className="text-xs leading-snug whitespace-nowrap">
+                                <span className="font-semibold">{x.label}</span> {x.subject}{' '}
+                                <span className="font-mono text-[11px] text-slate2">{x.days}</span>
+                              </div>
+                            ))}
                         </td>
                       );
                     })}
@@ -196,7 +206,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
 
           <p className="text-xs text-slate2 mt-2">
             Number under each name = periods per week. Days: 1 = Monday ... 5 = Friday. When a cell lists
-            several classes, the sections, subjects and days line up in order.
+            several classes, each class has its own line: section, subject, days.
           </p>
         </div>
       )}
