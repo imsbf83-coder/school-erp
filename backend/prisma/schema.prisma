@@ -193,6 +193,7 @@ model Class {
   teacherLinks TeacherClass[]
 
   timetableSchedules TimetableScheduleClass[]
+  timetableEntries   TimetableEntry[]
 }
 
 // ---------- HOLIDAYS ----------
@@ -764,4 +765,40 @@ model TimetableSlot {
 
   @@unique([scheduleId, position])
   @@index([scheduleId])
+}
+
+// One teaching entry in the weekly grid: "in class X section Y, period N, on
+// these days, subject S is taught by teacher T". The draft timetable shows
+// several of these stacked in one cell when the subject changes during the
+// week (e.g. Library on Monday, Computer on Tue-Thu). Days are stored as CSV
+// ISO weekday numbers ("1,2,3,4,5") - the screen compresses them to "1-5".
+// The teacher is a TimetableTeacher (see below).
+model TimetableEntry {
+  id           Int    @id @default(autoincrement())
+  classId      Int
+  class        Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section      String
+  periodNumber Int
+  subject      String
+  days         String
+  teacherId    Int?
+  teacher      TimetableTeacher? @relation(fields: [teacherId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classId, section, periodNumber])
+  @@index([teacherId])
+}
+
+// The people who teach in the timetable. One row per real person, so the same
+// teacher written as "A.QAYYUM", "QAYYUM" or "ABDUL QAYYM" in different
+// places is one teacher. fullName is printed on the teacher-wise timetable,
+// shortName on the class-wise one. (Not yet linked to the Staff table.)
+model TimetableTeacher {
+  id        Int    @id @default(autoincrement())
+  fullName  String @unique
+  shortName String
+
+  entries TimetableEntry[]
 }
