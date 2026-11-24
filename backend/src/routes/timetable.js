@@ -591,8 +591,20 @@ router.post(
       prisma.timetableEntry.createMany({ data: rows }),
     ]);
 
+    // Two import clicks that arrive together can both pass the "grid is empty"
+    // check above. Remove any exact duplicate rows so that can never leave
+    // double entries behind.
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM "TimetableEntry" a USING "TimetableEntry" b
+      WHERE a."id" > b."id"
+        AND a."classId" = b."classId" AND a."section" = b."section"
+        AND a."periodNumber" = b."periodNumber" AND a."subject" = b."subject"
+        AND a."days" = b."days" AND a."teacherId" IS NOT DISTINCT FROM b."teacherId"
+    `);
+
+    const total = await prisma.timetableEntry.count();
     res.status(201).json({
-      imported: rows.length,
+      imported: total,
       dropped,
       addedSections: Array.from(new Set(addedSections)),
       missingClasses: Array.from(missingClasses),
