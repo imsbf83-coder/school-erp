@@ -53,6 +53,7 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
   const [cell, setCell] = useState(null); // cell being edited
   const [cellError, setCellError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     load();
@@ -204,6 +205,8 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
   }
 
   async function handleImport() {
+    if (importing) return;
+    setImporting(true);
     setError('');
     setNotice([]);
     try {
@@ -212,10 +215,15 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
       if (data.addedSections.length) lines.push(`Sections added to classes: ${data.addedSections.join(', ')}.`);
       if (data.missingClasses.length) lines.push(`No class found for: ${data.missingClasses.join(', ')}.`);
       data.dropped.forEach((d) => lines.push(`Skipped: ${d}`));
-      setNotice(lines);
       await load();
+      setNotice(lines);
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not import the draft.');
+      const msg = err.response?.data?.error || 'Could not import the draft.';
+      // "already has entries" means an earlier click worked: just refresh the grid
+      await load();
+      setError(msg);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -277,8 +285,8 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
             Print
           </button>
           {canEdit && entries.length === 0 && schedules.length > 0 && (
-            <button onClick={handleImport} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light">
-              Import the 2026-27 draft timetable
+            <button onClick={handleImport} disabled={importing} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light disabled:opacity-50">
+              {importing ? 'Importing…' : 'Import the 2026-27 draft timetable'}
             </button>
           )}
           {canEdit && entries.length > 0 && (
