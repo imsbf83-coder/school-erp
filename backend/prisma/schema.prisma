@@ -800,6 +800,8 @@ model TimetableTeacher {
   id        Int    @id @default(autoincrement())
   fullName  String @unique
   shortName String
+  // WhatsApp number in international format without + (e.g. 923001234567)
+  phone     String?
 
   entries TimetableEntry[]
 
