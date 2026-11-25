@@ -194,6 +194,7 @@ model Class {
 
   timetableSchedules TimetableScheduleClass[]
   timetableEntries   TimetableEntry[]
+  timetableArrangements TimetableArrangement[]
 }
 
 // ---------- HOLIDAYS ----------
@@ -801,4 +802,54 @@ model TimetableTeacher {
   shortName String
 
   entries TimetableEntry[]
+
+  absences                 TimetableAbsence[]
+  arrangementsAsAbsent     TimetableArrangement[] @relation("ArrangementAbsent")
+  arrangementsAsSubstitute TimetableArrangement[] @relation("ArrangementSubstitute")
+}
+
+// ---------- ARRANGEMENTS (cover for teachers on leave) ----------
+
+// A teacher on leave on one date: the whole day, or only some periods
+// (periods is a CSV of period numbers, e.g. "3,4,5"). Dates are stored as
+// plain "YYYY-MM-DD" text so time zones can never shift them.
+model TimetableAbsence {
+  id        Int              @id @default(autoincrement())
+  date      String
+  teacherId Int
+  teacher   TimetableTeacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  fullDay   Boolean          @default(true)
+  periods   String           @default("")
+  reason    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, teacherId])
+  @@index([date])
+}
+
+// One period covered by another teacher on one date. subject is copied from
+// the timetable at the time, so old monthly reports stay correct even if the
+// timetable is changed later.
+model TimetableArrangement {
+  id                  Int              @id @default(autoincrement())
+  date                String
+  classId             Int
+  class               Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section             String
+  periodNumber        Int
+  subject             String
+  absentTeacherId     Int
+  absentTeacher       TimetableTeacher @relation("ArrangementAbsent", fields: [absentTeacherId], references: [id])
+  substituteTeacherId Int
+  substituteTeacher   TimetableTeacher @relation("ArrangementSubstitute", fields: [substituteTeacherId], references: [id])
+  note                String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, classId, section, periodNumber])
+  @@index([date])
+  @@index([substituteTeacherId])
 }
