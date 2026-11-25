@@ -18,6 +18,7 @@ export default function ArrangementPanel({ year }) {
   const [notice, setNotice] = useState('');
   const [opened, setOpened] = useState(new Set()); // teachers whose WhatsApp chat was opened for this date
   const [copied, setCopied] = useState(false);
+  const [contacts, setContacts] = useState({}); // teacherId -> { phone, source, staffName }
   const [form, setForm] = useState({ teacherId: '', mode: 'full', periods: [], reason: '' });
   const printRef = useRef(null);
 
@@ -29,6 +30,12 @@ export default function ArrangementPanel({ year }) {
         setClasses(c.data);
       } catch (err) {
         setError(err.response?.data?.error || 'Could not load teachers.');
+      }
+      try {
+        const { data } = await client.get('/timetable/teachers/contacts');
+        setContacts(data);
+      } catch {
+        // numbers are optional: the page still works without them
       }
     })();
   }, []);
@@ -130,7 +137,7 @@ export default function ArrangementPanel({ year }) {
   // ---------- WhatsApp ----------
   const ctx = { day, date, teacherName, classById };
   const schedules = day ? teacherSchedules(ctx) : [];
-  const phoneOf = (id) => teachers.find((t) => t.id === id)?.phone || '';
+  const phoneOf = (id) => contacts[id]?.phone || '';
 
   function openGroup() {
     window.open(whatsappLink(groupMessage(ctx)), '_blank');
@@ -461,6 +468,9 @@ export default function ArrangementPanel({ year }) {
                           <span className="text-slate2">
                             {' '}· period{sch.items.length > 1 ? 's' : ''} {sch.items.map((i) => i.periodNumber).join(', ')}
                           </span>
+                          {contacts[sch.teacherId]?.source === 'staff' && (
+                            <span className="block text-xs text-slate2">Number from Staff: {contacts[sch.teacherId].staffName}</span>
+                          )}
                         </div>
                         {phone ? (
                           <button
@@ -470,7 +480,7 @@ export default function ArrangementPanel({ year }) {
                             {opened.has(sch.teacherId) ? 'Opened ✓ (open again)' : 'WhatsApp'}
                           </button>
                         ) : (
-                          <span className="text-xs text-late">No number saved (add it in the Teachers tab)</span>
+                          <span className="text-xs text-late">No number found in Staff (set it in the Teachers tab)</span>
                         )}
                       </div>
                     );

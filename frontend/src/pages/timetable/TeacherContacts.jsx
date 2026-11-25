@@ -16,10 +16,11 @@ export default function TeacherContacts() {
   useEffect(() => {
     (async () => {
       try {
-        const [t, m] = await Promise.all([client.get('/timetable/teachers'), client.get('/timetable/teachers/staff-matches')]);
+        const [t, m] = await Promise.all([client.get('/timetable/teachers'), client.get('/timetable/teachers/contacts')]);
         setTeachers(t.data);
         setMatches(m.data);
-        setPhones(Object.fromEntries(t.data.map((x) => [x.id, x.phone ? `+${x.phone}` : ''])));
+        // show the number in use: the saved one, or the one found in Staff
+        setPhones(Object.fromEntries(t.data.map((x) => [x.id, m.data[x.id]?.phone ? `+${m.data[x.id].phone}` : ''])));
       } catch (err) {
         setError(err.response?.data?.error || 'Could not load teachers.');
       } finally {
@@ -36,6 +37,8 @@ export default function TeacherContacts() {
       const { data } = await client.put(`/timetable/teachers/${t.id}`, { phone: phones[t.id] });
       setTeachers((list) => list.map((x) => (x.id === t.id ? data : x)));
       setPhones((p) => ({ ...p, [t.id]: data.phone ? `+${data.phone}` : '' }));
+      const fresh = await client.get('/timetable/teachers/contacts');
+      setMatches(fresh.data);
       setNotice(`Saved ${t.fullName}.`);
     } catch (err) {
       setError(err.response?.data?.error || 'Could not save this number.');
@@ -46,14 +49,17 @@ export default function TeacherContacts() {
 
   if (loading) return <p className="text-slate2">Loading…</p>;
 
-  const missing = teachers.filter((t) => !t.phone).length;
+  const missing = teachers.filter((t) => !matches[t.id]?.phone).length;
+  const fromStaff = teachers.filter((t) => matches[t.id]?.source === 'staff').length;
 
   return (
     <div>
       <p className="text-sm text-slate2 mb-4 max-w-3xl">
-        WhatsApp numbers used to send each teacher their own arrangement. Type a number like 0300 1234567 (it is
-        saved with the country code, Pakistan 92 by default), or pick it from a similar-looking Staff record.
-        {missing > 0 ? ` ${missing} of ${teachers.length} teachers have no number yet.` : ' Every teacher has a number.'}
+        WhatsApp numbers used to send each teacher their own arrangement. They are taken from the Staff module
+        automatically when a Staff record clearly matches the teacher&apos;s name ({fromStaff} of {teachers.length} found
+        that way). Check the &quot;Source&quot; column. Where nothing matched, pick a staff member from the list or type a
+        number like 0300 1234567; a saved number always overrides Staff.
+        {missing > 0 ? ` ${missing} teacher(s) still have no number.` : ' Every teacher has a number.'}
       </p>
       {error && <p className="text-absent text-sm mb-3">{error}</p>}
       {notice && <p className="text-present text-sm mb-3">{notice}</p>}
@@ -64,14 +70,17 @@ export default function TeacherContacts() {
             <tr className="border-b border-ink/10 text-left">
               <th className="px-3 py-2">Teacher</th>
               <th className="px-3 py-2">Short name</th>
-              <th className="px-3 py-2 min-w-[14rem]">WhatsApp number</th>
+              <th className="px-3 py-2 min-w-[13rem]">WhatsApp number</th>
+              <th className="px-3 py-2 min-w-[11rem]">Source</th>
               <th className="px-3 py-2 min-w-[14rem]">Pick from Staff</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
           <tbody>
             {teachers.map((t) => {
-              const changed = (phones[t.id] || '') !== (t.phone ? `+${t.phone}` : '');
+              const info = matches[t.id] || {};
+              const effective = info.phone ? `+${info.phone}` : '';
+              const changed = (phones[t.id] || '') !== effective;
               return (
                 <tr key={t.id} className="border-b border-ink/5 last:border-0 align-top">
                   <td className="px-3 py-2 font-medium">{t.fullName}</td>
@@ -85,20 +94,25 @@ export default function TeacherContacts() {
                       className="w-full border border-ink/20 rounded-md px-2 py-1.5 bg-white text-sm"
                     />
                   </td>
+                  <td className="px-3 py-2 text-xs">
+                    {info.source === 'saved' && <span className="text-present">Saved here</span>}
+                    {info.source === 'staff' && <span>From Staff: <strong>{info.staffName}</strong></span>}
+                    {!info.source && <span className="text-late">Not found in Staff</span>}
+                  </td>
                   <td className="px-3 py-2">
-                    {(matches[t.id] || []).length > 0 ? (
+                    {(info.candidates || []).length > 0 ? (
                       <select
                         value=""
                         onChange={(e) => e.target.value && setPhones((p) => ({ ...p, [t.id]: e.target.value }))}
                         className="w-full border border-ink/20 rounded-md px-2 py-1.5 bg-white text-sm"
                       >
                         <option value="">Choose…</option>
-                        {matches[t.id].map((c) => (
-                          <option key={c.staffId} value={c.phone}>{c.name} · {c.phone}</option>
+                        {info.candidates.map((c) => (
+                          <option key={c.staffId} value={c.phone}>{c.name} · +{c.phone}{c.covers === 'full' ? '' : ' (partial name match)'}</option>
                         ))}
                       </select>
                     ) : (
-                      <span className="text-xs text-slate2">No similar staff name</span>
+                      <span className="text-xs text-slate2">No similar staff name with a phone</span>
                     )}
                   </td>
                   <td className="px-3 py-2">
