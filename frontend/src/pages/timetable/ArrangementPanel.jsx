@@ -14,6 +14,7 @@ export default function ArrangementPanel({ year }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
   const [form, setForm] = useState({ teacherId: '', mode: 'full', periods: [], reason: '' });
   const printRef = useRef(null);
 
@@ -36,6 +37,7 @@ export default function ArrangementPanel({ year }) {
   async function loadDay(d) {
     setLoading(true);
     setError('');
+    setNotice('');
     try {
       const { data } = await client.get('/timetable/arrangements/day', { params: { date: d } });
       setDay(data);
@@ -96,6 +98,29 @@ export default function ArrangementPanel({ year }) {
         substituteTeacherId: value === '' ? null : Number(value),
       })
     );
+  }
+
+  async function autoArrange() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const { data } = await client.post('/timetable/arrangements/auto', { date });
+      setDay(data.day);
+      const parts = [`Arranged ${data.assigned} period${data.assigned === 1 ? '' : 's'}.`];
+      if (data.unfilled) parts.push(`${data.unfilled} could not be filled: no teacher is free then. Arrange those by hand.`);
+      setNotice(parts.join(' '));
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not arrange automatically.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function clearAll() {
+    if (!window.confirm('Remove every arrangement for this date? The leave records stay.')) return;
+    setNotice('');
+    call(() => client.post('/timetable/arrangements/clear', { date }));
   }
 
   function togglePeriod(n) {
@@ -247,11 +272,27 @@ export default function ArrangementPanel({ year }) {
                   )}
                 </h2>
                 {items.length > 0 && (
-                  <button onClick={handlePrint} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
-                    Print arrangement sheet
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={autoArrange}
+                      disabled={busy || arrangedCount === items.length}
+                      className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light disabled:opacity-50"
+                    >
+                      Auto-arrange
+                    </button>
+                    {arrangedCount > 0 && (
+                      <button onClick={clearAll} disabled={busy} className="text-sm px-4 py-2 rounded-md border border-ink/20 text-absent hover:bg-white">
+                        Clear all
+                      </button>
+                    )}
+                    <button onClick={handlePrint} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white">
+                      Print arrangement sheet
+                    </button>
+                  </div>
                 )}
               </div>
+
+              {notice && <p className="text-sm text-present mb-3">{notice}</p>}
 
               {items.length === 0 ? (
                 <p className="text-sm text-slate2">The teacher(s) on leave have no classes in the selected periods on {weekdayName(date)}.</p>
@@ -290,11 +331,14 @@ export default function ArrangementPanel({ year }) {
                                   className={`w-full border rounded-md px-2 py-1.5 text-sm bg-white ${it.arrangement ? 'border-present' : 'border-ink/20'}`}
                                 >
                                   <option value="">— choose a free teacher ({it.options.length} free) —</option>
-                                  {it.options.map((o) => (
+                                  {it.options.map((o, idx) => (
                                     <option key={o.teacherId} value={o.teacherId}>
+                                      {idx === 0 && !it.arrangement ? 'Suggested: ' : ''}
                                       {teacherName(o.teacherId)}
-                                      {o.sameSubject ? ' ★ same subject' : ''} · {o.monthCount} this month
+                                      {o.returningDue ? ' · back from leave' : ''}
+                                      {o.sameSubject ? ' ★' : ''} · {o.monthCount} this month
                                       {o.dayCount ? ` · ${o.dayCount} today` : ''}
+                                      {o.lastDate ? ` · last ${fmtDate(o.lastDate).slice(0, 5)}` : ' · never yet'}
                                     </option>
                                   ))}
                                 </select>
@@ -307,11 +351,34 @@ export default function ArrangementPanel({ year }) {
                   </table>
                 </div>
               )}
-              <p className="text-xs text-slate2 mt-2">
-                Only teachers with no class at that time, not on leave, and not already covering another class at
-                that time are listed. ★ = teaches the same subject. The list is sorted with same-subject teachers
-                first, then those with the fewest arrangements this month.
-              </p>
+              <div className="text-xs text-slate2 mt-3 space-y-1">
+                <p>
+                  Only teachers with no class at that time, not on leave, and not already covering another class
+                  at that time are listed. The first one is the suggestion, chosen by these rules:
+                </p>
+                <ol className="list-decimal pl-5 space-y-0.5">
+                  <li>A teacher who was on leave the previous school day and is back today covers a period first.</li>
+                  <li>Then whoever has covered the fewest periods this month, so totals stay level.</li>
+                  <li>Ties go to whoever covered longest ago (rotation), then to the lighter teaching day. ★ = same subject.</li>
+                </ol>
+                <p>Auto-arrange follows the same rules. You can still change any row by hand afterwards.</p>
+              </div>
+
+              {day.monthCounts?.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs text-slate2 mb-2">
+                    Periods covered this month so far (most {day.monthCounts[0].count}, least{' '}
+                    {day.monthCounts[day.monthCounts.length - 1].count}):
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {day.monthCounts.map((m) => (
+                      <span key={m.teacherId} className="text-xs border border-ink/15 rounded-full px-2.5 py-1 bg-white">
+                        {teacherShort(m.teacherId)} <strong>{m.count}</strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
           )}
 

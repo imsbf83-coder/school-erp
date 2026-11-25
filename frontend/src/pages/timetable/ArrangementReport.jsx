@@ -49,7 +49,14 @@ export default function ArrangementReport() {
     if (!data) return null;
     const taken = new Map();
     for (const a of data.arrangements) taken.set(a.substituteTeacherId, (taken.get(a.substituteTeacherId) || 0) + 1);
-    const takenRows = Array.from(taken, ([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count || name(a.id).localeCompare(name(b.id)));
+    // every teacher is listed (even with 0) so the balance is visible
+    const takenRows = teachers
+      .map((t) => ({ id: t.id, count: taken.get(t.id) || 0 }))
+      .sort((a, b) => b.count - a.count || name(a.id).localeCompare(name(b.id)));
+    const counts = takenRows.map((x) => x.count);
+    const balance = counts.length
+      ? { max: Math.max(...counts), min: Math.min(...counts), avg: counts.reduce((a, b) => a + b, 0) / counts.length }
+      : null;
 
     const leave = new Map();
     for (const a of data.absences) {
@@ -63,7 +70,7 @@ export default function ArrangementReport() {
     const leaveRows = Array.from(leave.values()).sort((a, b) => b.days - a.days || name(a.id).localeCompare(name(b.id)));
 
     const totalToCover = data.absences.reduce((s, a) => s + a.periodsToCover, 0);
-    return { takenRows, leaveRows, totalToCover, arrangedTotal: data.arrangements.length };
+    return { takenRows, leaveRows, balance, totalToCover, arrangedTotal: data.arrangements.length };
   }
 
   const sum = summarise();
@@ -114,7 +121,14 @@ export default function ArrangementReport() {
               <strong>{Math.max(0, sum.totalToCover - sum.arrangedTotal)}</strong>
             </p>
 
-            <h3 className="font-semibold mb-2">Arrangements taken, by teacher</h3>
+            <h3 className="font-semibold mb-1">Arrangements taken, by teacher</h3>
+            {sum.balance && (
+              <p className="text-slate2 mb-2">
+                Most: <strong>{sum.balance.max}</strong> · Least: <strong>{sum.balance.min}</strong> · Difference:{' '}
+                <strong>{sum.balance.max - sum.balance.min}</strong> · Average per teacher:{' '}
+                <strong>{sum.balance.avg.toFixed(1)}</strong>
+              </p>
+            )}
             {sum.takenRows.length === 0 ? (
               <p className="text-slate2 mb-5">None.</p>
             ) : (
