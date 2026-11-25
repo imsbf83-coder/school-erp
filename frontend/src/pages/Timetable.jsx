@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import TimetableGrid from './timetable/TimetableGrid';
 import TeacherwiseGrid from './timetable/TeacherwiseGrid';
 import PeriodSetup from './timetable/PeriodSetup';
+import ArrangementPanel from './timetable/ArrangementPanel';
+import ArrangementReport from './timetable/ArrangementReport';
 
 // Academic year label for the printed heading, e.g. "2026-27". The new year
 // starts in April.
@@ -23,7 +25,13 @@ export default function Timetable() {
   const tabs = [
     ['class', 'Class-wise'],
     ['teacher', 'Teacher-wise'],
-    ...(canEdit ? [['setup', 'Period setup']] : []),
+    ...(canEdit
+      ? [
+          ['arrange', 'Arrangements'],
+          ['report', 'Arrangement report'],
+          ['setup', 'Period setup'],
+        ]
+      : []),
   ];
 
   return (
@@ -47,6 +55,8 @@ export default function Timetable() {
 
       {tab === 'class' && <TimetableGrid canEdit={canEdit} year={year} onYearChange={setYear} />}
       {tab === 'teacher' && <TeacherwiseGrid year={year} onYearChange={setYear} />}
+      {tab === 'arrange' && canEdit && <ArrangementPanel year={year} />}
+      {tab === 'report' && canEdit && <ArrangementReport />}
       {tab === 'setup' && canEdit && <PeriodSetup />}
     </div>
   );
