@@ -244,7 +244,7 @@ export default function ArrangementPanel({ year }) {
                     className="w-full border border-ink/20 rounded-md px-2 py-2 bg-white text-sm"
                   >
                     <option value="">Choose a teacher…</option>
-                    {teachers.map((t) => (
+                    {teachers.filter((t) => t.active).map((t) => (
                       <option key={t.id} value={t.id}>{t.fullName}</option>
                     ))}
                   </select>

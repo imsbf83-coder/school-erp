@@ -12,6 +12,7 @@ export default function TeacherContacts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [reassignTo, setReassignTo] = useState({}); // retired teacher id -> chosen replacement id
 
   useEffect(() => {
     (async () => {
@@ -47,9 +48,45 @@ export default function TeacherContacts() {
     }
   }
 
+  async function reload() {
+    const [t, m] = await Promise.all([client.get('/timetable/teachers'), client.get('/timetable/teachers/contacts')]);
+    setTeachers(t.data);
+    setMatches(m.data);
+  }
+
+  async function setActive(t, active) {
+    if (!active && !window.confirm(`Mark ${t.fullName} as retired? He will no longer be offered for arrangements or counted in the monthly balance.`)) return;
+    setError('');
+    setNotice('');
+    try {
+      await client.put(`/timetable/teachers/${t.id}`, { active });
+      await reload();
+      setNotice(active ? `${t.fullName} is active again.` : `${t.fullName} is marked as retired.`);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not change the status.');
+    }
+  }
+
+  async function reassign(t) {
+    const toId = reassignTo[t.id];
+    if (!toId) return;
+    const to = teachers.find((x) => String(x.id) === String(toId));
+    if (!window.confirm(`Move all ${matches[t.id]?.periods || 0} timetable entries of ${t.fullName} to ${to?.fullName}?`)) return;
+    setError('');
+    setNotice('');
+    try {
+      const { data } = await client.post(`/timetable/teachers/${t.id}/reassign`, { toTeacherId: Number(toId) });
+      await reload();
+      setNotice(`Moved ${data.moved} timetable entries from ${t.fullName} to ${to?.fullName}.`);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not move these periods.');
+    }
+  }
+
   if (loading) return <p className="text-slate2">Loading…</p>;
 
-  const missing = teachers.filter((t) => !matches[t.id]?.phone).length;
+  const activeTeachers = teachers.filter((t) => t.active);
+  const missing = activeTeachers.filter((t) => !matches[t.id]?.phone).length;
   const fromStaff = teachers.filter((t) => matches[t.id]?.source === 'staff').length;
 
   return (
@@ -69,7 +106,7 @@ export default function TeacherContacts() {
           <thead>
             <tr className="border-b border-ink/10 text-left">
               <th className="px-3 py-2">Teacher</th>
-              <th className="px-3 py-2">Short name</th>
+              <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2 min-w-[13rem]">WhatsApp number</th>
               <th className="px-3 py-2 min-w-[11rem]">Source</th>
               <th className="px-3 py-2 min-w-[14rem]">Pick from Staff</th>
@@ -77,14 +114,52 @@ export default function TeacherContacts() {
             </tr>
           </thead>
           <tbody>
-            {teachers.map((t) => {
+            {[...teachers].sort((a, b) => Number(b.active) - Number(a.active) || a.fullName.localeCompare(b.fullName)).map((t) => {
               const info = matches[t.id] || {};
               const effective = info.phone ? `+${info.phone}` : '';
               const changed = (phones[t.id] || '') !== effective;
               return (
                 <tr key={t.id} className="border-b border-ink/5 last:border-0 align-top">
-                  <td className="px-3 py-2 font-medium">{t.fullName}</td>
-                  <td className="px-3 py-2 text-slate2">{t.shortName}</td>
+                  <td className={`px-3 py-2 font-medium ${t.active ? '' : 'text-slate2'}`}>
+                    {t.fullName}
+                    <span className="block text-xs font-normal text-slate2">{t.shortName}</span>
+                  </td>
+                  <td className="px-3 py-2 text-xs min-w-[11rem]">
+                    {t.active ? (
+                      <button onClick={() => setActive(t, false)} className="px-2 py-1 rounded-md border border-ink/20 hover:bg-paper">
+                        Active · mark retired
+                      </button>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <span className="inline-block px-2 py-0.5 rounded-full bg-ink/10">Retired</span>
+                        <button onClick={() => setActive(t, true)} className="block text-slate2 underline">
+                          make active again
+                        </button>
+                        {(info.periods || 0) > 0 && (
+                          <div className="text-late space-y-1">
+                            <p>Still has {info.periods} timetable entries.</p>
+                            <select
+                              value={reassignTo[t.id] || ''}
+                              onChange={(e) => setReassignTo((r) => ({ ...r, [t.id]: e.target.value }))}
+                              className="w-full border border-ink/20 rounded-md px-1.5 py-1 bg-white text-xs text-ink"
+                            >
+                              <option value="">Move his periods to…</option>
+                              {activeTeachers.map((x) => (
+                                <option key={x.id} value={x.id}>{x.fullName}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => reassign(t)}
+                              disabled={!reassignTo[t.id]}
+                              className="px-2 py-1 rounded-md bg-ink text-paper disabled:opacity-30"
+                            >
+                              Move periods
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     <input
                       value={phones[t.id] || ''}

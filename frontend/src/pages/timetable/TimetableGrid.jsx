@@ -145,7 +145,7 @@ export default function TimetableGrid({ canEdit, year, onYearChange }) {
 
   // typing suggestions: both the printed short name and the full name work
   const suggestions = useMemo(() => {
-    const set = new Set(teachers.flatMap((t) => [t.shortName, t.fullName]));
+    const set = new Set(teachers.filter((t) => t.active).flatMap((t) => [t.shortName, t.fullName]));
     return Array.from(set).sort();
   }, [teachers]);
 

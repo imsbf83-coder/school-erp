@@ -176,6 +176,7 @@ export default function TeacherwiseGrid({ year, onYearChange }) {
                   <tr key={t.id}>
                     <th className="border border-ink/30 px-2 py-2 text-left font-semibold whitespace-nowrap align-middle">
                       {t.fullName}
+                      {!t.active && <span className="block text-[10px] font-normal text-late">(retired)</span>}
                       <span className="block font-mono text-[11px] font-normal text-slate2">{weeklyLoad(t.id)}</span>
                     </th>
                     {slots.map((s) => {

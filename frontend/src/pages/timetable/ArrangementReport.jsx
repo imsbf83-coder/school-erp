@@ -51,9 +51,11 @@ export default function ArrangementReport() {
     for (const a of data.arrangements) taken.set(a.substituteTeacherId, (taken.get(a.substituteTeacherId) || 0) + 1);
     // every teacher is listed (even with 0) so the balance is visible
     const takenRows = teachers
-      .map((t) => ({ id: t.id, count: taken.get(t.id) || 0 }))
+      .filter((t) => t.active || taken.has(t.id)) // a retired teacher only appears if he covered something
+      .map((t) => ({ id: t.id, count: taken.get(t.id) || 0, active: t.active }))
       .sort((a, b) => b.count - a.count || name(a.id).localeCompare(name(b.id)));
-    const counts = takenRows.map((x) => x.count);
+    // the balance only looks at teachers who are still working
+    const counts = takenRows.filter((x) => x.active).map((x) => x.count);
     const balance = counts.length
       ? { max: Math.max(...counts), min: Math.min(...counts), avg: counts.reduce((a, b) => a + b, 0) / counts.length }
       : null;
@@ -139,7 +141,7 @@ export default function ArrangementReport() {
                   </thead>
                   <tbody>
                     {sum.takenRows.map((r) => (
-                      <tr key={r.id}><td className={td}>{name(r.id)}</td><td className={td}>{r.count}</td></tr>
+                      <tr key={r.id}><td className={td}>{name(r.id)}{r.active ? '' : ' (retired)'}</td><td className={td}>{r.count}</td></tr>
                     ))}
                   </tbody>
                 </table>
