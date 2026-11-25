@@ -26,6 +26,22 @@ function weekdayOf(date) {
   return g >= 1 && g <= 5 ? g : null;
 }
 
+function shiftDate(date, days) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// the school day before this one (Monday -> the Friday before)
+function prevSchoolDay(date) {
+  let d = date;
+  for (let i = 0; i < 7; i += 1) {
+    d = shiftDate(d, -1);
+    if (weekdayOf(d) !== null) return d;
+  }
+  return null;
+}
+
 function toMinutes(t) {
   const [h, m] = t.split(':').map(Number);
   return h * 60 + m;
@@ -106,15 +122,24 @@ function neededItems(absence, entries, weekday, map) {
 async function buildDay(date) {
   const weekday = weekdayOf(date);
   const monthPrefix = date.slice(0, 7);
-  const [teachers, classes, absences, dayArrangements, monthArrangements, entries, map] = await Promise.all([
-    prisma.timetableTeacher.findMany(),
-    prisma.class.findMany(),
-    prisma.timetableAbsence.findMany({ where: { date }, orderBy: { id: 'asc' } }),
-    prisma.timetableArrangement.findMany({ where: { date } }),
-    prisma.timetableArrangement.findMany({ where: { date: { startsWith: monthPrefix } } }),
-    prisma.timetableEntry.findMany(),
-    loadScheduleMap(),
-  ]);
+  const prevDate = prevSchoolDay(date);
+  const [teachers, classes, absences, dayArrangements, monthArrangements, entries, map, prevAbsences, lastRows] =
+    await Promise.all([
+      prisma.timetableTeacher.findMany(),
+      prisma.class.findMany(),
+      prisma.timetableAbsence.findMany({ where: { date }, orderBy: { id: 'asc' } }),
+      prisma.timetableArrangement.findMany({ where: { date } }),
+      prisma.timetableArrangement.findMany({ where: { date: { startsWith: monthPrefix } } }),
+      prisma.timetableEntry.findMany(),
+      loadScheduleMap(),
+      prevDate ? prisma.timetableAbsence.findMany({ where: { date: prevDate } }) : Promise.resolve([]),
+      // most recent arrangement each teacher has ever covered, before this date (for rotation)
+      prisma.timetableArrangement.groupBy({
+        by: ['substituteTeacherId'],
+        where: { date: { lt: date } },
+        _max: { date: true },
+      }),
+    ]);
 
   const result = {
     date,
@@ -123,6 +148,8 @@ async function buildDay(date) {
     periodNumbers: [],
     absences: absences.map(absenceShape),
     items: [],
+    monthCounts: [],
+    returningTeacherIds: [],
   };
   if (weekday === null) return result;
 
@@ -160,6 +187,16 @@ async function buildDay(date) {
 
   const monthCount = new Map();
   for (const a of monthArrangements) monthCount.set(a.substituteTeacherId, (monthCount.get(a.substituteTeacherId) || 0) + 1);
+
+  // Teachers who were on leave the previous school day and are back today.
+  const todayAbsent = new Set(absences.map((a) => a.teacherId));
+  const returning = new Set(prevAbsences.map((a) => a.teacherId).filter((id) => !todayAbsent.has(id)));
+  result.returningTeacherIds = Array.from(returning);
+
+  const lastDate = new Map(lastRows.map((r) => [r.substituteTeacherId, r._max.date]));
+  result.monthCounts = teachers
+    .map((t) => ({ teacherId: t.id, count: monthCount.get(t.id) || 0 }))
+    .sort((a, b) => b.count - a.count || a.teacherId - b.teacherId);
 
   function isFree(teacherId, item) {
     const ab = absenceByTeacher.get(teacherId);
@@ -201,20 +238,33 @@ async function buildDay(date) {
       .filter((t) => t.id !== item.absentTeacherId && isFree(t.id, item))
       .map((t) => {
         const taughtToday = new Set((teachingByTeacher.get(t.id) || []).map((x) => x.period)).size;
+        // a returning teacher is "owed" one arrangement; once they have one today they rotate like everyone
+        const dayCountExcludingThis = assignments.filter((a) => a.substituteTeacherId === t.id && a.key !== item.key).length;
         return {
           teacherId: t.id,
           sameSubject: subjectsByTeacher.get(t.id)?.has(item.subject) || false,
+          returning: returning.has(t.id),
+          returningDue: returning.has(t.id) && dayCountExcludingThis === 0,
           monthCount: monthCount.get(t.id) || 0,
-          dayCount: dayLoad.get(t.id) || 0,
+          dayCount: dayCountExcludingThis,
+          lastDate: lastDate.get(t.id) || null,
           teachingToday: taughtToday,
         };
       })
+      // Suggested order = the order automatic arrangement uses:
+      //  1. teachers back from leave who have not yet covered anything today
+      //  2. fewest arrangements this month (keeps the month-end totals level)
+      //  3. covered the longest time ago (rotation; never covered = first)
+      //  4. fewest already today, then lightest teaching day
+      //  5. same subject, then id (so ties are stable)
       .sort(
         (a, b) =>
-          Number(b.sameSubject) - Number(a.sameSubject) ||
+          Number(b.returningDue) - Number(a.returningDue) ||
           a.monthCount - b.monthCount ||
+          (a.lastDate || '').localeCompare(b.lastDate || '') ||
           a.dayCount - b.dayCount ||
           a.teachingToday - b.teachingToday ||
+          Number(b.sameSubject) - Number(a.sameSubject) ||
           a.teacherId - b.teacherId
       );
     return {
@@ -341,6 +391,56 @@ router.put(
         note,
       },
     });
+    res.json(await buildDay(date));
+  })
+);
+
+// POST /api/timetable/arrangements/auto  { date }
+// Fills every period that still has no arrangement, one at a time, always
+// taking the first suggested teacher. Hardest periods (fewest free teachers)
+// go first. The page is rebuilt after each pick so counts and clashes stay
+// right. Periods already arranged by hand are left alone.
+router.post(
+  '/auto',
+  asyncHandler(async (req, res) => {
+    const date = String(req.body.date || '');
+    if (!isRealDate(date)) return res.status(400).json({ error: 'Pick a valid date.' });
+
+    let day = await buildDay(date);
+    let assigned = 0;
+    for (let guard = 0; guard < 60; guard += 1) {
+      const pending = day.items.filter((i) => !i.arrangement && i.options.length > 0);
+      if (!pending.length) break;
+      pending.sort((a, b) => a.options.length - b.options.length || a.periodNumber - b.periodNumber);
+      const item = pending[0];
+      await prisma.timetableArrangement.upsert({
+        where: { date_classId_section_periodNumber: { date, classId: item.classId, section: item.section, periodNumber: item.periodNumber } },
+        update: { substituteTeacherId: item.options[0].teacherId, absentTeacherId: item.absentTeacherId, subject: item.subject },
+        create: {
+          date,
+          classId: item.classId,
+          section: item.section,
+          periodNumber: item.periodNumber,
+          subject: item.subject,
+          absentTeacherId: item.absentTeacherId,
+          substituteTeacherId: item.options[0].teacherId,
+        },
+      });
+      assigned += 1;
+      day = await buildDay(date);
+    }
+    const unfilled = day.items.filter((i) => !i.arrangement).length;
+    res.json({ day, assigned, unfilled });
+  })
+);
+
+// POST /api/timetable/arrangements/clear  { date } - removes all arrangements for the date
+router.post(
+  '/clear',
+  asyncHandler(async (req, res) => {
+    const date = String(req.body.date || '');
+    if (!isRealDate(date)) return res.status(400).json({ error: 'Pick a valid date.' });
+    await prisma.timetableArrangement.deleteMany({ where: { date } });
     res.json(await buildDay(date));
   })
 );
