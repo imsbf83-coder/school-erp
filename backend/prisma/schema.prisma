@@ -802,6 +802,9 @@ model TimetableTeacher {
   shortName String
   // WhatsApp number in international format without + (e.g. 923001234567)
   phone     String?
+  // false once a teacher has retired / left: they are no longer offered for
+  // arrangements or counted in the monthly balance, and their old history stays
+  active    Boolean @default(true)
 
   entries TimetableEntry[]
 
