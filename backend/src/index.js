@@ -15,6 +15,7 @@ const busRoutes = require('./routes/bus');
 const staffAccessRoutes = require('./routes/staffAccess');
 const meRoutes = require('./routes/me');
 const timetableRoutes = require('./routes/timetable');
+const timetableArrangementRoutes = require('./routes/timetableArrangements');
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/staff', staffRoutes);
 app.use('/api/bus', busRoutes);
 app.use('/api/staff-access', staffAccessRoutes);
 app.use('/api/me', meRoutes);
+app.use('/api/timetable/arrangements', timetableArrangementRoutes);
 app.use('/api/timetable', timetableRoutes);
 
 // 404 handler
