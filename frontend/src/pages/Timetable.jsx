@@ -6,6 +6,7 @@ import TeacherwiseGrid from './timetable/TeacherwiseGrid';
 import PeriodSetup from './timetable/PeriodSetup';
 import ArrangementPanel from './timetable/ArrangementPanel';
 import ArrangementReport from './timetable/ArrangementReport';
+import TeacherContacts from './timetable/TeacherContacts';
 
 // Academic year label for the printed heading, e.g. "2026-27". The new year
 // starts in April.
@@ -29,6 +30,7 @@ export default function Timetable() {
       ? [
           ['arrange', 'Arrangements'],
           ['report', 'Arrangement report'],
+          ['contacts', 'Teachers'],
           ['setup', 'Period setup'],
         ]
       : []),
@@ -57,6 +59,7 @@ export default function Timetable() {
       {tab === 'teacher' && <TeacherwiseGrid year={year} onYearChange={setYear} />}
       {tab === 'arrange' && canEdit && <ArrangementPanel year={year} />}
       {tab === 'report' && canEdit && <ArrangementReport />}
+      {tab === 'contacts' && canEdit && <TeacherContacts />}
       {tab === 'setup' && canEdit && <PeriodSetup />}
     </div>
   );
