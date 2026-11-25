@@ -387,6 +387,93 @@ router.get(
   })
 );
 
+// Turns what a person types into WhatsApp's format: digits only, with the
+// country code. "0300 1234567" -> "923001234567" (Pakistan is assumed when the
+// number starts with a single 0). Returns null for empty, undefined if invalid.
+function normalizePhone(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (!d) return null;
+  if (d.startsWith('00')) d = d.slice(2);
+  else if (d.startsWith('0')) d = `92${d.slice(1)}`;
+  if (d.length < 10 || d.length > 15) return undefined;
+  return d;
+}
+
+// PUT /api/timetable/teachers/:id  { phone?, fullName?, shortName? }
+router.put(
+  '/teachers/:id',
+  canEdit,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const existing = await prisma.timetableTeacher.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Teacher not found.' });
+
+    const data = {};
+    if (req.body.phone !== undefined) {
+      const phone = normalizePhone(req.body.phone);
+      if (phone === undefined) return res.status(400).json({ error: 'Enter a valid mobile number, for example 0300 1234567.' });
+      data.phone = phone;
+    }
+    if (req.body.fullName !== undefined) {
+      const v = String(req.body.fullName).trim().toUpperCase();
+      if (!v) return res.status(400).json({ error: 'The full name cannot be empty.' });
+      data.fullName = v;
+    }
+    if (req.body.shortName !== undefined) {
+      const v = String(req.body.shortName).trim().toUpperCase();
+      if (!v) return res.status(400).json({ error: 'The short name cannot be empty.' });
+      data.shortName = v;
+    }
+    try {
+      res.json(await prisma.timetableTeacher.update({ where: { id }, data }));
+    } catch (e) {
+      if (e.code === 'P2002') return res.status(409).json({ error: 'Another teacher already has that full name.' });
+      throw e;
+    }
+  })
+);
+
+// GET /api/timetable/teachers/staff-matches
+// For each timetable teacher, the Staff records whose names look similar and
+// that have a phone number, so the number can be picked instead of typed.
+// Only suggestions: spellings differ, so a person confirms each one.
+router.get(
+  '/teachers/staff-matches',
+  canEdit,
+  asyncHandler(async (req, res) => {
+    const [teachers, staff] = await Promise.all([
+      prisma.timetableTeacher.findMany(),
+      prisma.staff.findMany({
+        where: { phone: { not: null } },
+        select: { id: true, firstName: true, lastName: true, phone: true, category: true },
+      }),
+    ]);
+    const tokens = (name) =>
+      String(name || '')
+        .toUpperCase()
+        .split(/[^A-Z]+/)
+        .filter((t) => t.length >= 3);
+    const similar = (a, b) =>
+      a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b.slice(0, 4)) || b.startsWith(a.slice(0, 4))));
+
+    const out = {};
+    for (const t of teachers) {
+      const tt = tokens(`${t.fullName} ${t.shortName}`);
+      const scored = staff
+        .map((st) => {
+          const st2 = tokens(`${st.firstName} ${st.lastName}`);
+          const score = st2.filter((x) => tt.some((y) => similar(x, y))).length;
+          return { staffId: st.id, name: `${st.firstName} ${st.lastName}`.trim(), phone: st.phone, score };
+        })
+        .filter((c) => c.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+      out[t.id] = scored;
+    }
+    res.json(out);
+  })
+);
+
 // Finds the teacher a typed name refers to (matching either the full or the
 // short name, ignoring spaces, dots and case) or creates a new one.
 async function resolveTeacher(typed, cache) {
