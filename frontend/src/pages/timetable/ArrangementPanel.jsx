@@ -3,6 +3,7 @@ import client from '../../api/client';
 import { SCHOOL_INFO } from '../../config/schoolInfo';
 import printElement from './printElement';
 import { classSection, fmtDate, fmtTime, shiftDate, todayString, weekdayName } from './arrangementUtils';
+import { groupMessage, teacherMessage, teacherSchedules, whatsappLink } from './arrangementMessages';
 
 // Daily arrangements: mark teachers on leave (whole day or some periods), see
 // the periods that need cover, pick a free teacher for each, print the sheet.
@@ -15,6 +16,8 @@ export default function ArrangementPanel({ year }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [opened, setOpened] = useState(new Set()); // teachers whose WhatsApp chat was opened for this date
+  const [copied, setCopied] = useState(false);
   const [form, setForm] = useState({ teacherId: '', mode: 'full', periods: [], reason: '' });
   const printRef = useRef(null);
 
@@ -38,6 +41,7 @@ export default function ArrangementPanel({ year }) {
     setLoading(true);
     setError('');
     setNotice('');
+    setOpened(new Set());
     try {
       const { data } = await client.get('/timetable/arrangements/day', { params: { date: d } });
       setDay(data);
@@ -122,6 +126,34 @@ export default function ArrangementPanel({ year }) {
     setNotice('');
     call(() => client.post('/timetable/arrangements/clear', { date }));
   }
+
+  // ---------- WhatsApp ----------
+  const ctx = { day, date, teacherName, classById };
+  const schedules = day ? teacherSchedules(ctx) : [];
+  const phoneOf = (id) => teachers.find((t) => t.id === id)?.phone || '';
+
+  function openGroup() {
+    window.open(whatsappLink(groupMessage(ctx)), '_blank');
+  }
+
+  async function copyGroup() {
+    try {
+      await navigator.clipboard.writeText(groupMessage(ctx));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      window.prompt('Copy this message:', groupMessage(ctx));
+    }
+  }
+
+  function openTeacher(sch) {
+    const phone = phoneOf(sch.teacherId);
+    if (!phone) return;
+    window.open(whatsappLink(teacherMessage({ ...ctx, teacherId: sch.teacherId, items: sch.items }), phone), '_blank');
+    setOpened((s) => new Set(s).add(sch.teacherId));
+  }
+
+  const nextToSend = schedules.find((s) => phoneOf(s.teacherId) && !opened.has(s.teacherId));
 
   function togglePeriod(n) {
     setForm((f) => ({
@@ -379,6 +411,75 @@ export default function ArrangementPanel({ year }) {
                   </div>
                 </div>
               )}
+            </section>
+          )}
+
+          {/* WhatsApp */}
+          {arrangedCount > 0 && (
+            <section className="bg-white border border-ink/10 rounded-lg p-4 sm:p-5 mb-6">
+              <h2 className="font-display text-lg text-ink mb-1">Send on WhatsApp</h2>
+              <p className="text-xs text-slate2 mb-4">
+                Each button opens WhatsApp with the message already written. Press Send there. (Messages are not
+                sent automatically.)
+              </p>
+
+              <div className="mb-5">
+                <p className="text-sm font-medium mb-2">Whole schedule, to the staff group</p>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={openGroup} className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light">
+                    Share to WhatsApp (choose the group)
+                  </button>
+                  <button onClick={copyGroup} className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-paper">
+                    {copied ? 'Copied ✓' : 'Copy message'}
+                  </button>
+                </div>
+                {arrangedCount < items.length && (
+                  <p className="text-xs text-late mt-2">
+                    {items.length - arrangedCount} period(s) are still not arranged; they show as "not arranged yet" in the message.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-sm font-medium">Each teacher privately ({schedules.length})</p>
+                  <button
+                    onClick={() => nextToSend && openTeacher(nextToSend)}
+                    disabled={!nextToSend}
+                    className="text-sm px-4 py-2 rounded-md bg-ink text-paper hover:bg-ink-light disabled:opacity-40"
+                  >
+                    {nextToSend ? `Send to next: ${teacherShort(nextToSend.teacherId)}` : 'All opened'}
+                  </button>
+                </div>
+                <div className="border border-ink/10 rounded-md divide-y divide-ink/10">
+                  {schedules.map((sch) => {
+                    const phone = phoneOf(sch.teacherId);
+                    return (
+                      <div key={sch.teacherId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                        <div>
+                          <strong>{teacherName(sch.teacherId)}</strong>
+                          <span className="text-slate2">
+                            {' '}· period{sch.items.length > 1 ? 's' : ''} {sch.items.map((i) => i.periodNumber).join(', ')}
+                          </span>
+                        </div>
+                        {phone ? (
+                          <button
+                            onClick={() => openTeacher(sch)}
+                            className="text-sm px-3 py-1.5 rounded-md border border-ink/20 hover:bg-paper"
+                          >
+                            {opened.has(sch.teacherId) ? 'Opened ✓ (open again)' : 'WhatsApp'}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-late">No number saved (add it in the Teachers tab)</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-slate2 mt-2">
+                  Tip: press "Send to next" repeatedly. After you send each message in WhatsApp, come back and press it again.
+                </p>
+              </div>
             </section>
           )}
 
