@@ -195,6 +195,7 @@ async function buildDay(date) {
 
   const lastDate = new Map(lastRows.map((r) => [r.substituteTeacherId, r._max.date]));
   result.monthCounts = teachers
+    .filter((t) => t.active)
     .map((t) => ({ teacherId: t.id, count: monthCount.get(t.id) || 0 }))
     .sort((a, b) => b.count - a.count || a.teacherId - b.teacherId);
 
@@ -235,7 +236,7 @@ async function buildDay(date) {
   result.items = items.map((item) => {
     const current = assignments.find((a) => a.key === item.key);
     const options = teachers
-      .filter((t) => t.id !== item.absentTeacherId && isFree(t.id, item))
+      .filter((t) => t.active && t.id !== item.absentTeacherId && isFree(t.id, item))
       .map((t) => {
         const taughtToday = new Set((teachingByTeacher.get(t.id) || []).map((x) => x.period)).size;
         // a returning teacher is "owed" one arrangement; once they have one today they rotate like everyone

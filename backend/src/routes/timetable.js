@@ -403,6 +403,7 @@ router.put(
       if (phone === undefined) return res.status(400).json({ error: 'Enter a valid mobile number, for example 0300 1234567.' });
       data.phone = phone;
     }
+    if (req.body.active !== undefined) data.active = Boolean(req.body.active);
     if (req.body.fullName !== undefined) {
       const v = String(req.body.fullName).trim().toUpperCase();
       if (!v) return res.status(400).json({ error: 'The full name cannot be empty.' });
@@ -422,6 +423,65 @@ router.put(
   })
 );
 
+// POST /api/timetable/teachers/:id/reassign  { toTeacherId }
+// Moves every timetable entry of one teacher (e.g. someone who retired) to
+// another teacher. Refused, with the reasons, if the new teacher would be in
+// two classes at the same time on any day.
+router.post(
+  '/teachers/:id/reassign',
+  canEdit,
+  asyncHandler(async (req, res) => {
+    const fromId = Number(req.params.id);
+    const toId = Number(req.body.toTeacherId);
+    if (!Number.isInteger(toId) || toId === fromId) return res.status(400).json({ error: 'Choose a different teacher to take over.' });
+    const [from, to] = await Promise.all([
+      prisma.timetableTeacher.findUnique({ where: { id: fromId } }),
+      prisma.timetableTeacher.findUnique({ where: { id: toId } }),
+    ]);
+    if (!from || !to) return res.status(404).json({ error: 'Teacher not found.' });
+
+    const [moving, theirs, map, classes] = await Promise.all([
+      prisma.timetableEntry.findMany({ where: { teacherId: fromId } }),
+      prisma.timetableEntry.findMany({ where: { teacherId: toId } }),
+      loadScheduleMap(),
+      prisma.class.findMany(),
+    ]);
+    if (!moving.length) return res.status(400).json({ error: `${from.fullName} has no periods in the timetable.` });
+    const classById = new Map(classes.map((c) => [c.id, c]));
+
+    const clashes = [];
+    for (const e of moving) {
+      const eDays = e.days.split(',').map(Number);
+      for (const o of theirs) {
+        const oDays = o.days.split(',').map(Number);
+        const hit = [];
+        for (const d of eDays) {
+          if (!oDays.includes(d)) continue;
+          const a = map.get(e.classId)?.[d]?.[e.periodNumber];
+          const b = map.get(o.classId)?.[d]?.[o.periodNumber];
+          if (a && b && a[0] < b[1] && b[0] < a[1]) hit.push(DAY_NAMES[d]);
+        }
+        if (hit.length) {
+          const c1 = classById.get(e.classId);
+          const c2 = classById.get(o.classId);
+          clashes.push(
+            `${c1 ? classLabel(c1, e.section) : '?'} period ${e.periodNumber} (${e.subject}) clashes with ${to.fullName}'s ` +
+              `${c2 ? classLabel(c2, o.section) : '?'} period ${o.periodNumber} on ${hit.join(', ')}.`
+          );
+        }
+      }
+    }
+    if (clashes.length) {
+      return res.status(409).json({
+        error: `${to.fullName} is not free for all of these periods. ${Array.from(new Set(clashes)).slice(0, 5).join(' ')}`,
+      });
+    }
+
+    const r = await prisma.timetableEntry.updateMany({ where: { teacherId: fromId }, data: { teacherId: toId } });
+    res.json({ moved: r.count });
+  })
+);
+
 // GET /api/timetable/teachers/contacts
 // The WhatsApp number to use for each teacher, keyed by teacher id:
 //   source "saved" - a number typed in the Teachers tab (always wins)
@@ -433,23 +493,26 @@ router.get(
   '/teachers/contacts',
   canEdit,
   asyncHandler(async (req, res) => {
-    const [teachers, staff] = await Promise.all([
+    const [teachers, staff, counts] = await Promise.all([
       prisma.timetableTeacher.findMany(),
       prisma.staff.findMany({
         where: { phone: { not: null }, status: { in: ['ACTIVE', 'ON_LEAVE'] } },
         select: { id: true, firstName: true, lastName: true, phone: true, category: true },
       }),
+      prisma.timetableEntry.groupBy({ by: ['teacherId'], _count: { _all: true } }),
     ]);
+    const entryCount = new Map(counts.map((c) => [c.teacherId, c._count._all]));
     const out = {};
     for (const t of teachers) {
+      const periods = entryCount.get(t.id) || 0;
       if (t.phone) {
-        out[t.id] = { phone: t.phone, source: 'saved', staffName: null, candidates: [] };
+        out[t.id] = { phone: t.phone, source: 'saved', staffName: null, candidates: [], periods };
         continue;
       }
       const m = matchStaff(t, staff);
       out[t.id] = m.confident
-        ? { phone: m.confident.phone, source: 'staff', staffName: m.confident.name, candidates: m.candidates }
-        : { phone: null, source: null, staffName: null, candidates: m.candidates };
+        ? { phone: m.confident.phone, source: 'staff', staffName: m.confident.name, candidates: m.candidates, periods }
+        : { phone: null, source: null, staffName: null, candidates: m.candidates, periods };
     }
     res.json(out);
   })
