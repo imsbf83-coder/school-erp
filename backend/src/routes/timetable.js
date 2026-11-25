@@ -3,6 +3,7 @@ const prisma = require('../prismaClient');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth } = require('../middleware/auth');
 const { MODULES, requireRoleOrPermission } = require('../utils/permissions');
+const { matchStaff, normalizePhone } = require('../utils/staffMatch');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -387,18 +388,6 @@ router.get(
   })
 );
 
-// Turns what a person types into WhatsApp's format: digits only, with the
-// country code. "0300 1234567" -> "923001234567" (Pakistan is assumed when the
-// number starts with a single 0). Returns null for empty, undefined if invalid.
-function normalizePhone(raw) {
-  let d = String(raw || '').replace(/\D/g, '');
-  if (!d) return null;
-  if (d.startsWith('00')) d = d.slice(2);
-  else if (d.startsWith('0')) d = `92${d.slice(1)}`;
-  if (d.length < 10 || d.length > 15) return undefined;
-  return d;
-}
-
 // PUT /api/timetable/teachers/:id  { phone?, fullName?, shortName? }
 router.put(
   '/teachers/:id',
@@ -433,42 +422,34 @@ router.put(
   })
 );
 
-// GET /api/timetable/teachers/staff-matches
-// For each timetable teacher, the Staff records whose names look similar and
-// that have a phone number, so the number can be picked instead of typed.
-// Only suggestions: spellings differ, so a person confirms each one.
+// GET /api/timetable/teachers/contacts
+// The WhatsApp number to use for each teacher, keyed by teacher id:
+//   source "saved" - a number typed in the Teachers tab (always wins)
+//   source "staff" - taken from the Staff module, when exactly one Staff
+//                    record clearly matches the teacher's name
+//   no source      - nothing certain; `candidates` lists similar Staff names
+//                    so a person can pick one
 router.get(
-  '/teachers/staff-matches',
+  '/teachers/contacts',
   canEdit,
   asyncHandler(async (req, res) => {
     const [teachers, staff] = await Promise.all([
       prisma.timetableTeacher.findMany(),
       prisma.staff.findMany({
-        where: { phone: { not: null } },
+        where: { phone: { not: null }, status: { in: ['ACTIVE', 'ON_LEAVE'] } },
         select: { id: true, firstName: true, lastName: true, phone: true, category: true },
       }),
     ]);
-    const tokens = (name) =>
-      String(name || '')
-        .toUpperCase()
-        .split(/[^A-Z]+/)
-        .filter((t) => t.length >= 3);
-    const similar = (a, b) =>
-      a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b.slice(0, 4)) || b.startsWith(a.slice(0, 4))));
-
     const out = {};
     for (const t of teachers) {
-      const tt = tokens(`${t.fullName} ${t.shortName}`);
-      const scored = staff
-        .map((st) => {
-          const st2 = tokens(`${st.firstName} ${st.lastName}`);
-          const score = st2.filter((x) => tt.some((y) => similar(x, y))).length;
-          return { staffId: st.id, name: `${st.firstName} ${st.lastName}`.trim(), phone: st.phone, score };
-        })
-        .filter((c) => c.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-      out[t.id] = scored;
+      if (t.phone) {
+        out[t.id] = { phone: t.phone, source: 'saved', staffName: null, candidates: [] };
+        continue;
+      }
+      const m = matchStaff(t, staff);
+      out[t.id] = m.confident
+        ? { phone: m.confident.phone, source: 'staff', staffName: m.confident.name, candidates: m.candidates }
+        : { phone: null, source: null, staffName: null, candidates: m.candidates };
     }
     res.json(out);
   })
