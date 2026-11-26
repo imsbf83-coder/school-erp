@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { requireAuth } = require('../middleware/auth');
+const { todayStart } = require('../utils/suspensions');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -409,6 +410,8 @@ router.delete('/withdrawals/:studentId', async (req, res, next) => {
       // deleteMany (not delete) so this doesn't throw if the student's
       // status was somehow changed without a Withdrawal row ever existing.
       prisma.withdrawal.deleteMany({ where: { studentId: sId } }),
+      // if the student was suspended, that suspension ends now too
+      prisma.studentSuspension.updateMany({ where: { studentId: sId, cancelled: false, endDate: { gte: todayStart() } }, data: { cancelled: true } }),
       prisma.student.update({ where: { id: sId }, data: { status: 'REGULAR' } }),
     ]);
 
