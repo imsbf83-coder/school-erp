@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { requireAuth } = require('../middleware/auth');
+const { syncNow, todayStart } = require('../utils/suspensions');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -118,6 +119,8 @@ router.get('/', async (req, res, next) => {
         where,
         include: {
           class: true,
+          // the current/most recent suspension, for the "suspended from - till" column
+          suspensions: { where: { cancelled: false }, orderBy: { startDate: 'desc' }, take: 1 },
           // So the list can show "Previously: STU-0042" / "Re-admitted as: STU-0099"
           // without a follow-up request per row.
           previousStudent: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
@@ -139,6 +142,116 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// ---------- Suspensions ----------
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function parseDay(s) {
+  if (!DATE_RE.test(String(s || ''))) return null;
+  const d = new Date(`${s}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? null : d;
+}
+
+// GET /students/suspensions?when=current|history
+// current (default): suspensions that are running now or still to come.
+// history: everything, including finished and cancelled ones.
+// Registered before '/:id' so "suspensions" is never read as a student id.
+router.get('/suspensions', async (req, res, next) => {
+  try {
+    const today = todayStart();
+    const history = req.query.when === 'history';
+    const rows = await prisma.studentSuspension.findMany({
+      where: history ? {} : { cancelled: false, endDate: { gte: today } },
+      include: { student: { include: { class: true } } },
+      orderBy: [{ startDate: 'desc' }, { id: 'desc' }],
+    });
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        studentId: r.studentId,
+        admissionNumber: r.student.admissionNumber,
+        name: `${r.student.firstName} ${r.student.lastName}`,
+        className: r.student.class?.name || '',
+        section: r.student.section || '',
+        guardianName: r.student.guardianName,
+        guardianPhone: r.student.guardianPhone || '',
+        startDate: r.startDate,
+        endDate: r.endDate,
+        reason: r.reason || '',
+        remarks: r.remarks || '',
+        state: r.cancelled ? 'CANCELLED' : r.endDate < today ? 'COMPLETED' : r.startDate > today ? 'UPCOMING' : 'ACTIVE',
+      }))
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /students/:id/suspend  { startDate, endDate, reason?, remarks? }
+// Both dates are required and both days count as suspended. The student's
+// status becomes SUSPENDED when the period covers today, and goes back to
+// REGULAR on its own the day after endDate. A new suspension replaces any
+// that is still running or upcoming for the same student.
+router.post('/:id/suspend', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const student = await prisma.student.findUnique({ where: { id } });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    if (['STRUCK_OFF', 'SLC', 'PASSOUT'].includes(student.status)) {
+      return res.status(400).json({ error: 'This student has already left the school (Struck Off, SLC or Passout), so cannot be suspended.' });
+    }
+
+    const startDate = parseDay(req.body.startDate);
+    const endDate = parseDay(req.body.endDate);
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'Both the start date and the end date of the suspension are required.' });
+    }
+    if (endDate < startDate) return res.status(400).json({ error: 'The end date cannot be before the start date.' });
+    if (endDate < todayStart()) {
+      return res.status(400).json({ error: 'The suspension has already ended by that end date. Choose an end date from today onwards.' });
+    }
+
+    await prisma.$transaction([
+      prisma.studentSuspension.updateMany({
+        where: { studentId: id, cancelled: false, endDate: { gte: todayStart() } },
+        data: { cancelled: true },
+      }),
+      prisma.studentSuspension.create({
+        data: {
+          studentId: id,
+          startDate,
+          endDate,
+          reason: String(req.body.reason || '').trim() || null,
+          remarks: String(req.body.remarks || '').trim() || null,
+        },
+      }),
+    ]);
+    await syncNow();
+    const updated = await prisma.student.findUnique({ where: { id }, select: { status: true } });
+    res.status(201).json({ status: updated.status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /students/:id/suspension - ends a suspension early (or cancels one
+// that has not started) and returns the student to REGULAR now.
+router.delete('/:id/suspension', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const student = await prisma.student.findUnique({ where: { id } });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    await prisma.studentSuspension.updateMany({
+      where: { studentId: id, cancelled: false, endDate: { gte: todayStart() } },
+      data: { cancelled: true },
+    });
+    await syncNow();
+    const updated = await prisma.student.findUnique({ where: { id }, select: { status: true } });
+    res.json({ status: updated.status });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------- GET /students/:id ----------
 
 router.get('/:id', async (req, res, next) => {
@@ -149,6 +262,7 @@ router.get('/:id', async (req, res, next) => {
         class: true,
         admission: true,
         withdrawal: true,
+        suspensions: { orderBy: { startDate: 'desc' } },
         previousStudent: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
         readmittedAs: { select: { id: true, admissionNumber: true, firstName: true, lastName: true } },
       },
@@ -395,9 +509,9 @@ router.post('/:id/readmit', async (req, res, next) => {
     const oldId = Number(req.params.id);
     const old = await prisma.student.findUnique({ where: { id: oldId } });
     if (!old) return res.status(404).json({ error: 'Student not found' });
-    if (old.status === 'REGULAR') {
+    if (old.status === 'REGULAR' || old.status === 'SUSPENDED') {
       return res.status(400).json({
-        error: 'This student is already active. Re-admission is for a student who previously left (Struck Off, SLC, or Passout).',
+        error: 'This student is still on the roll. Re-admission is for a student who previously left (Struck Off, SLC, or Passout).',
       });
     }
 
