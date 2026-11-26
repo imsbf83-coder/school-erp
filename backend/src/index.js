@@ -16,6 +16,7 @@ const staffAccessRoutes = require('./routes/staffAccess');
 const meRoutes = require('./routes/me');
 const timetableRoutes = require('./routes/timetable');
 const timetableArrangementRoutes = require('./routes/timetableArrangements');
+const { syncSuspensions, syncIfDue } = require('./utils/suspensions');
 
 const app = express();
 
@@ -27,6 +28,12 @@ app.use(cors({ origin: rawOrigins.length ? rawOrigins : '*' }));
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
+// Before any data is read, make sure suspended students whose suspension has
+// ended are back to REGULAR (and ones that start today are SUSPENDED).
+app.use('/api', (req, res, next) => {
+  syncIfDue().then(() => next(), () => next());
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
@@ -59,4 +66,9 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`School ERP API running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`School ERP API running on port ${PORT}`);
+  // switch suspensions on/off right away, then keep checking once an hour
+  syncSuspensions().catch((err) => console.error('Suspension sync failed:', err.message));
+  setInterval(() => syncSuspensions().catch((err) => console.error('Suspension sync failed:', err.message)), 60 * 60 * 1000);
+});
