@@ -562,12 +562,158 @@ router.post('/:id/readmit', async (req, res, next) => {
   }
 });
 
-// ---------- DELETE /students/:id ----------
+// ---------- Deleting a student, and merging a duplicate entry ----------
 
+// Everything that points at a student. The first three are real history
+// (attendance, exam marks, bus payments); the rest are just the student's own
+// paperwork.
+async function linkCounts(id) {
+  const [admission, withdrawal, attendance, examResults, busPayments, readmissions] = await Promise.all([
+    prisma.admission.count({ where: { studentId: id } }),
+    prisma.withdrawal.count({ where: { studentId: id } }),
+    prisma.attendanceRecord.count({ where: { studentId: id } }),
+    prisma.examResult.count({ where: { studentId: id } }),
+    prisma.busFeePayment.count({ where: { studentId: id } }),
+    prisma.student.count({ where: { previousStudentId: id } }),
+  ]);
+  return { admission, withdrawal, attendance, examResults, busPayments, readmissions };
+}
+
+const sameName = (s) => `${s.firstName} ${s.lastName}`.toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Other students with the same name (ignoring capital letters and extra
+// spaces): the likely twin of a duplicate entry.
+async function findDuplicates(student) {
+  const all = await prisma.student.findMany({
+    where: { id: { not: student.id } },
+    select: { id: true, admissionNumber: true, firstName: true, lastName: true, guardianName: true, section: true, status: true, class: { select: { name: true } } },
+  });
+  const me = sameName(student);
+  return all
+    .filter((o) => sameName(o) === me)
+    .map((o) => ({
+      id: o.id,
+      admissionNumber: o.admissionNumber,
+      name: `${o.firstName} ${o.lastName}`,
+      className: o.class?.name || '',
+      section: o.section || '',
+      guardianName: o.guardianName,
+      status: o.status,
+    }));
+}
+
+// DELETE /students/:id
+// Removes a student that has no history. Their own admission form,
+// withdrawal record and suspensions go with them. A student who already has
+// attendance, exam marks or bus payments is NOT deleted: the answer is 409
+// with the counts and any same-name entries, so the records can be moved onto
+// the right entry instead (POST /students/:id/merge-into).
 router.delete('/:id', async (req, res, next) => {
   try {
-    await prisma.student.delete({ where: { id: Number(req.params.id) } });
+    const id = Number(req.params.id);
+    const student = await prisma.student.findUnique({ where: { id } });
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+
+    const links = await linkCounts(id);
+    if (links.attendance + links.examResults + links.busPayments > 0) {
+      const parts = [];
+      if (links.attendance) parts.push(`${links.attendance} attendance record(s)`);
+      if (links.examResults) parts.push(`${links.examResults} exam result(s)`);
+      if (links.busPayments) parts.push(`${links.busPayments} bus fee payment(s)`);
+      return res.status(409).json({
+        error: `This student cannot simply be deleted: they have ${parts.join(', ')}.`,
+        links,
+        duplicates: await findDuplicates(student),
+      });
+    }
+
+    await prisma.$transaction([
+      // anyone re-admitted from this student just loses the link
+      prisma.student.updateMany({ where: { previousStudentId: id }, data: { previousStudentId: null } }),
+      prisma.withdrawal.deleteMany({ where: { studentId: id } }),
+      // the admission form details are deleted with it (cascade)
+      prisma.admission.deleteMany({ where: { studentId: id } }),
+      prisma.student.delete({ where: { id } }),
+    ]);
     res.json({ message: 'Student deleted' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /students/:id/merge-into  { keepAdmissionNumber } (or { keepId })
+// For a duplicate entry that already has records: moves its attendance, exam
+// results, bus payments, admission form and re-admission links onto the entry
+// to keep, then deletes the duplicate. Where both entries have a record for
+// the same day / exam subject / month, the entry that is kept wins and the
+// duplicate's copy is dropped. Returns what was moved and what was dropped.
+router.post('/:id/merge-into', async (req, res, next) => {
+  try {
+    const dupId = Number(req.params.id);
+    const dup = await prisma.student.findUnique({ where: { id: dupId } });
+    if (!dup) return res.status(404).json({ error: 'Student not found' });
+
+    let keep = null;
+    if (req.body.keepId) keep = await prisma.student.findUnique({ where: { id: Number(req.body.keepId) } });
+    else if (req.body.keepAdmissionNumber) {
+      keep = await prisma.student.findUnique({ where: { admissionNumber: String(req.body.keepAdmissionNumber).trim() } });
+    }
+    if (!keep) return res.status(404).json({ error: 'No student found with that admission number.' });
+    if (keep.id === dup.id) return res.status(400).json({ error: 'Choose the OTHER entry to keep, not this same student.' });
+
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const out = {};
+
+        // split a list of the duplicate's records into "move" and "drop"
+        // according to whether the kept student already has that key
+        const split = (dupRows, keepKeys, keyOf) => {
+          const move = [];
+          const drop = [];
+          for (const r of dupRows) (keepKeys.has(keyOf(r)) ? drop : move).push(r.id);
+          return { move, drop };
+        };
+
+        const keepAtt = new Set((await tx.attendanceRecord.findMany({ where: { studentId: keep.id }, select: { date: true } })).map((r) => r.date.getTime()));
+        const att = split(await tx.attendanceRecord.findMany({ where: { studentId: dup.id }, select: { id: true, date: true } }), keepAtt, (r) => r.date.getTime());
+        if (att.move.length) await tx.attendanceRecord.updateMany({ where: { id: { in: att.move } }, data: { studentId: keep.id } });
+        if (att.drop.length) await tx.attendanceRecord.deleteMany({ where: { id: { in: att.drop } } });
+        out.attendance = { moved: att.move.length, dropped: att.drop.length };
+
+        const keepRes = new Set((await tx.examResult.findMany({ where: { studentId: keep.id }, select: { examSubjectId: true } })).map((r) => r.examSubjectId));
+        const res = split(await tx.examResult.findMany({ where: { studentId: dup.id }, select: { id: true, examSubjectId: true } }), keepRes, (r) => r.examSubjectId);
+        if (res.move.length) await tx.examResult.updateMany({ where: { id: { in: res.move } }, data: { studentId: keep.id } });
+        if (res.drop.length) await tx.examResult.deleteMany({ where: { id: { in: res.drop } } });
+        out.examResults = { moved: res.move.length, dropped: res.drop.length };
+
+        const keepPay = new Set((await tx.busFeePayment.findMany({ where: { studentId: keep.id }, select: { month: true } })).map((r) => r.month));
+        const pay = split(await tx.busFeePayment.findMany({ where: { studentId: dup.id }, select: { id: true, month: true } }), keepPay, (r) => r.month);
+        if (pay.move.length) await tx.busFeePayment.updateMany({ where: { id: { in: pay.move } }, data: { studentId: keep.id } });
+        if (pay.drop.length) await tx.busFeePayment.deleteMany({ where: { id: { in: pay.drop } } });
+        out.busPayments = { moved: pay.move.length, dropped: pay.drop.length };
+
+        // admission form: keep the kept student's; otherwise hand over the duplicate's
+        const dupAdm = await tx.admission.findUnique({ where: { studentId: dup.id } });
+        if (dupAdm) {
+          const keepAdm = await tx.admission.findUnique({ where: { studentId: keep.id } });
+          if (keepAdm) await tx.admission.delete({ where: { id: dupAdm.id } });
+          else await tx.admission.update({ where: { id: dupAdm.id }, data: { studentId: keep.id } });
+          out.admission = keepAdm ? 'dropped' : 'moved';
+        }
+
+        await tx.withdrawal.deleteMany({ where: { studentId: dup.id } });
+
+        // re-admission links that pointed at the duplicate now point at the kept entry
+        if (keep.previousStudentId === dup.id) await tx.student.update({ where: { id: keep.id }, data: { previousStudentId: null } });
+        await tx.student.updateMany({ where: { previousStudentId: dup.id, id: { not: keep.id } }, data: { previousStudentId: keep.id } });
+
+        await tx.student.delete({ where: { id: dup.id } });
+        return out;
+      },
+      { timeout: 30000 }
+    );
+
+    res.json({ kept: { id: keep.id, admissionNumber: keep.admissionNumber }, ...result });
   } catch (err) {
     next(err);
   }
