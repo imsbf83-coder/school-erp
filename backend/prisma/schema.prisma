@@ -144,6 +144,9 @@ model Student {
   // REGULAR = currently enrolled, appears in class lists.
   // STRUCK_OFF / SLC / PASSOUT = exit statuses, each with its own report;
   // none of them appear in the day-to-day class list.
+  // SUSPENDED = temporarily out (see StudentSuspension). Switched on and off
+  // by the dates of the suspension, not by hand: the server returns the
+  // student to REGULAR on the day after the suspension's last day.
   status String @default("REGULAR")
 
   // Bus service (optional - only set if the student uses the school bus)
@@ -174,6 +177,7 @@ model Student {
 
   admission      Admission?
   withdrawal     Withdrawal?
+  suspensions    StudentSuspension[]
   attendance     AttendanceRecord[]
   examResults    ExamResult[]
   busFeePayments BusFeePayment[]
@@ -857,4 +861,28 @@ model TimetableArrangement {
   @@unique([date, classId, section, periodNumber])
   @@index([date])
   @@index([substituteTeacherId])
+}
+
+// ---------- SUSPENSIONS ----------
+
+// A student suspended from startDate to endDate, both days included. While
+// the dates cover today the student's status is SUSPENDED; the day after
+// endDate the server sets it back to REGULAR by itself. Rows are kept after
+// they end, as the student's suspension history. Dates are stored as UTC
+// midnight of the calendar day that was chosen.
+model StudentSuspension {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+  remarks   String?
+  // true when the suspension was ended early (reactivated by hand) or
+  // replaced by a new one; it then never switches the student on again
+  cancelled Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([studentId])
+  @@index([startDate, endDate])
 }
