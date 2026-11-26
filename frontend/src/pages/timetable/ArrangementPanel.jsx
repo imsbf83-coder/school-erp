@@ -528,7 +528,14 @@ export default function ArrangementPanel({ year }) {
                 ))}
               </tbody>
             </table>
-            <p className="text-sm mt-10">Principal / Vice Principal: ______________________</p>
+            <div className="flex gap-16 mt-16 text-sm">
+              <div className="flex-1 text-center">
+                <div className="border-t border-ink/70 pt-1">Time Table In-charge</div>
+              </div>
+              <div className="flex-1 text-center">
+                <div className="border-t border-ink/70 pt-1">Principal / Vice Principal</div>
+              </div>
+            </div>
           </div>
         </>
       )}
