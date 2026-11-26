@@ -857,21 +857,32 @@ function OrphanReport({ classes }) {
 function ExitStatusReport() {
   const [status, setStatus] = useState('STRUCK_OFF');
   const [students, setStudents] = useState([]);
+  const [suspensions, setSuspensions] = useState([]);
+  const [history, setHistory] = useState(false); // suspended tab: include finished suspensions
   const [loading, setLoading] = useState(true);
 
   const STATUS_TABS = [
     { key: 'STRUCK_OFF', label: 'Struck Off' },
     { key: 'SLC', label: 'SLC' },
+    { key: 'SUSPENDED', label: 'Suspended' },
     { key: 'PASSOUT', label: 'Passout' },
   ];
 
   useEffect(() => {
     load(status);
-  }, [status]);
+  }, [status, history]);
+
+  const fmtDay = (iso) => (iso ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : '');
+  const stateLabel = { ACTIVE: 'Suspended now', UPCOMING: 'Starts later', COMPLETED: 'Finished', CANCELLED: 'Ended early' };
 
   async function load(s) {
     setLoading(true);
     try {
+      if (s === 'SUSPENDED') {
+        const { data } = await client.get('/students/suspensions', { params: { when: history ? 'history' : 'current' } });
+        setSuspensions(data);
+        return;
+      }
       const { data } = await client.get('/students', { params: { status: s, pageSize: 500 } });
       setStudents(data.students);
     } finally {
@@ -880,6 +891,30 @@ function ExitStatusReport() {
   }
 
   function handleExport() {
+    if (status === 'SUSPENDED') {
+      exportRowsToCSV(
+        'suspended-students.csv',
+        [
+          { key: 'admissionNumber', label: 'Admission No.' },
+          { key: 'name', label: 'Name' },
+          { key: 'className', label: 'Class' },
+          { key: 'from', label: 'Suspended From' },
+          { key: 'till', label: 'Suspended Till' },
+          { key: 'reason', label: 'Reason' },
+          { key: 'state', label: 'Status' },
+        ],
+        suspensions.map((x) => ({
+          admissionNumber: x.admissionNumber,
+          name: x.name,
+          className: `${x.className} ${x.section}`.trim(),
+          from: fmtDay(x.startDate),
+          till: fmtDay(x.endDate),
+          reason: x.reason,
+          state: stateLabel[x.state],
+        }))
+      );
+      return;
+    }
     exportRowsToCSV(
       `${status.toLowerCase()}-students.csv`,
       [
@@ -917,6 +952,50 @@ function ExitStatusReport() {
         ))}
       </div>
 
+      {status === 'SUSPENDED' ? (
+        <>
+          <label className="flex items-center gap-2 text-sm text-slate2 mb-3 print:hidden">
+            <input type="checkbox" checked={history} onChange={(e) => setHistory(e.target.checked)} />
+            Include finished and earlier suspensions
+          </label>
+          <ReportToolbar onExportCSV={handleExport} count={suspensions.length} noun="suspension" />
+          <div className="bg-white border border-ink/10 rounded-lg overflow-x-auto">
+            <table className="register-table w-full text-sm">
+              <thead>
+                <tr className="border-b border-ink/10 text-left">
+                  <th className="px-4 py-3">Admission No.</th>
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Class</th>
+                  <th className="px-4 py-3">Suspended from</th>
+                  <th className="px-4 py-3">Suspended till</th>
+                  <th className="px-4 py-3">Reason</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td className="px-4 py-6 text-slate2" colSpan={7}>Loading…</td></tr>
+                ) : suspensions.length === 0 ? (
+                  <tr><td className="px-4 py-6 text-slate2" colSpan={7}>No suspended students.</td></tr>
+                ) : (
+                  suspensions.map((x) => (
+                    <tr key={x.id} className="border-b border-ink/5 last:border-0">
+                      <td className="px-4 py-3 font-mono text-xs">{x.admissionNumber}</td>
+                      <td className="px-4 py-3">{x.name}</td>
+                      <td className="px-4 py-3 text-slate2">{x.className} {x.section}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{fmtDay(x.startDate)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{fmtDay(x.endDate)}</td>
+                      <td className="px-4 py-3 text-slate2">{x.reason || '—'}</td>
+                      <td className="px-4 py-3 text-slate2">{stateLabel[x.state]}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <>
       <ReportToolbar onExportCSV={handleExport} count={students.length} noun="student" />
 
       <div className="bg-white border border-ink/10 rounded-lg overflow-hidden">
@@ -949,6 +1028,8 @@ function ExitStatusReport() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </div>
   );
 }

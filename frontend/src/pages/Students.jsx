@@ -67,6 +67,7 @@ const STATUS_OPTIONS = [
   { value: 'REGULAR', label: 'Regular' },
   { value: 'STRUCK_OFF', label: 'Struck Off' },
   { value: 'SLC', label: 'SLC' },
+  { value: 'SUSPENDED', label: 'Suspended' },
   { value: 'PASSOUT', label: 'Passout' },
 ];
 
@@ -161,6 +162,9 @@ export default function Students() {
   }
 
   const [withdrawalModal, setWithdrawalModal] = useState(null); // { studentId, studentName, status }
+  const [suspensionModal, setSuspensionModal] = useState(null); // { studentId, studentName }
+  const [suspensionForm, setSuspensionForm] = useState({ startDate: '', endDate: '', reason: '', remarks: '' });
+  const [suspensionError, setSuspensionError] = useState('');
   const [withdrawalForm, setWithdrawalForm] = useState({ withdrawalDate: '', reason: '', transferCertIssued: false, remarks: '' });
 
   // --- Individual class/section edit (quick action) ---
@@ -309,15 +313,84 @@ export default function Students() {
     return new Date().toISOString().slice(0, 10);
   }
 
+  // "2026-11-27T00:00:00.000Z" -> "27-11-2026" (read straight from the date, no time zone shift)
+  function fmtDay(iso) {
+    return iso ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : '';
+  }
+
+  // the calendar day after a YYYY-MM-DD date
+  function dayAfter(ymd) {
+    const d = new Date(`${ymd}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }
+
   function handleStatusChange(studentId, studentName, newStatus) {
+    const current = students.find((x) => x.id === studentId);
+    if (newStatus === 'SUSPENDED') {
+      openSuspension(studentId, studentName, null);
+      return;
+    }
     if (newStatus === 'REGULAR') {
-      handleReactivate(studentId);
+      if (current?.status === 'SUSPENDED') handleEndSuspension(studentId, studentName);
+      else handleReactivate(studentId);
       return;
     }
     // Exit statuses (STRUCK_OFF/SLC/PASSOUT) need a date and reason recorded
     // as a proper Withdrawal record, not just a silent status flip.
     setWithdrawalForm({ withdrawalDate: todayISO(), reason: '', transferCertIssued: false, remarks: '' });
     setWithdrawalModal({ studentId, studentName, status: newStatus });
+  }
+
+  // existing = the student's current suspension (to change its dates), or null for a new one
+  function openSuspension(studentId, studentName, existing) {
+    setSuspensionError('');
+    setSuspensionForm({
+      startDate: existing ? existing.startDate.slice(0, 10) : todayISO(),
+      endDate: existing ? existing.endDate.slice(0, 10) : '',
+      reason: existing?.reason || '',
+      remarks: existing?.remarks || '',
+    });
+    setSuspensionModal({ studentId, studentName });
+  }
+
+  async function submitSuspension(e) {
+    e.preventDefault();
+    if (!suspensionModal) return;
+    const { startDate, endDate } = suspensionForm;
+    if (!startDate || !endDate) {
+      setSuspensionError('Both the "from" and "till" dates are required.');
+      return;
+    }
+    if (endDate < startDate) {
+      setSuspensionError('The "till" date cannot be before the "from" date.');
+      return;
+    }
+    setSavingId(suspensionModal.studentId);
+    setSuspensionError('');
+    try {
+      await client.post(`/students/${suspensionModal.studentId}/suspend`, suspensionForm);
+      setSuspensionModal(null);
+      loadStudents(filters);
+    } catch (err) {
+      setSuspensionError(err.response?.data?.error || 'Could not save this suspension.');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function handleEndSuspension(studentId, studentName) {
+    if (!window.confirm(`End the suspension of ${studentName} now and move them back to Regular?`)) return;
+    setSavingId(studentId);
+    setError('');
+    try {
+      await client.delete(`/students/${studentId}/suspension`);
+      loadStudents(filters);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not end this suspension.');
+    } finally {
+      setSavingId(null);
+    }
   }
 
   async function submitWithdrawal(e) {
@@ -745,7 +818,19 @@ export default function Students() {
                     </select>
                   </td>
                   <td className="px-4 py-3 text-slate2 text-xs">
-                    {s.status !== 'REGULAR' && s.withdrawal?.withdrawalDate
+                    {s.status === 'SUSPENDED' && s.suspensions?.[0] ? (
+                      <>
+                        <span className="whitespace-nowrap">
+                          {fmtDay(s.suspensions[0].startDate)} to {fmtDay(s.suspensions[0].endDate)}
+                        </span>
+                        <button
+                          onClick={() => openSuspension(s.id, `${s.firstName} ${s.lastName}`, s.suspensions[0])}
+                          className="block text-ink underline"
+                        >
+                          change dates
+                        </button>
+                      </>
+                    ) : s.status !== 'REGULAR' && s.withdrawal?.withdrawalDate
                       ? new Date(s.withdrawal.withdrawalDate).toLocaleDateString()
                       : s.status !== 'REGULAR' ? '—' : ''}
                   </td>
@@ -840,6 +925,74 @@ export default function Students() {
               <button
                 type="submit"
                 disabled={savingId === withdrawalModal.studentId}
+                className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90 disabled:opacity-50"
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {suspensionModal && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4">
+          <form
+            onSubmit={submitSuspension}
+            className="bg-white border border-ink/10 rounded-lg p-6 w-full max-w-md"
+          >
+            <h3 className="text-sm font-medium text-ink mb-1">Suspend {suspensionModal.studentName}</h3>
+            <p className="text-xs text-slate2 mb-4">
+              The student is suspended from the first date to the last date (both days included). They go back to
+              Regular automatically the day after the last day.
+            </p>
+
+            {suspensionError && <p className="text-absent text-sm mb-3">{suspensionError}</p>}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <Field
+                label="Suspended from"
+                type="date"
+                value={suspensionForm.startDate}
+                onChange={(v) => setSuspensionForm({ ...suspensionForm, startDate: v })}
+                required
+              />
+              <Field
+                label="Suspended till (last day)"
+                type="date"
+                value={suspensionForm.endDate}
+                onChange={(v) => setSuspensionForm({ ...suspensionForm, endDate: v })}
+                required
+              />
+            </div>
+            {suspensionForm.endDate && suspensionForm.endDate >= suspensionForm.startDate && (
+              <p className="text-xs text-slate2 mb-3">
+                Back to Regular automatically on <strong>{fmtDay(dayAfter(suspensionForm.endDate))}</strong>.
+              </p>
+            )}
+            <div className="grid grid-cols-1 gap-3 mb-4">
+              <Field
+                label="Reason (optional)"
+                value={suspensionForm.reason}
+                onChange={(v) => setSuspensionForm({ ...suspensionForm, reason: v })}
+              />
+              <Field
+                label="Remarks (optional)"
+                value={suspensionForm.remarks}
+                onChange={(v) => setSuspensionForm({ ...suspensionForm, remarks: v })}
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setSuspensionModal(null)}
+                className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingId === suspensionModal.studentId}
                 className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90 disabled:opacity-50"
               >
                 Save
@@ -1113,6 +1266,7 @@ function statusPillClasses(status) {
     STRUCK_OFF: 'bg-absent/10 text-absent',
     SLC: 'bg-ink/10 text-ink',
     PASSOUT: 'bg-brass/10 text-brass-dark',
+    SUSPENDED: 'bg-late/10 text-late',
   };
   return colors[status] || '';
 }
