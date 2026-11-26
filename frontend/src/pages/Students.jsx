@@ -163,6 +163,9 @@ export default function Students() {
 
   const [withdrawalModal, setWithdrawalModal] = useState(null); // { studentId, studentName, status }
   const [suspensionModal, setSuspensionModal] = useState(null); // { studentId, studentName }
+  const [deleteBlock, setDeleteBlock] = useState(null); // { studentId, studentName, error, links, duplicates }
+  const [keepNumber, setKeepNumber] = useState('');
+  const [mergeError, setMergeError] = useState('');
   const [suspensionForm, setSuspensionForm] = useState({ startDate: '', endDate: '', reason: '', remarks: '' });
   const [suspensionError, setSuspensionError] = useState('');
   const [withdrawalForm, setWithdrawalForm] = useState({ withdrawalDate: '', reason: '', transferCertIssued: false, remarks: '' });
@@ -443,16 +446,51 @@ export default function Students() {
   }
 
   async function handleDelete(studentId, studentName) {
-    if (!window.confirm(`Permanently delete ${studentName}? This cannot be undone. If they have attendance, exam, or bus payment history, use "Struck Off" / "SLC" status instead of deleting.`)) {
+    if (!window.confirm(`Permanently delete ${studentName}? This cannot be undone.`)) {
       return;
     }
     setSavingId(studentId);
     setError('');
+    setBulkMessage('');
     try {
       await client.delete(`/students/${studentId}`);
       loadStudents(filters);
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not delete this student — they likely have linked attendance, exam, or bus payment records. Use "Struck Off" or "SLC" status instead.');
+      const data = err.response?.data;
+      if (err.response?.status === 409 && data?.links) {
+        // The student has attendance / marks / bus payments. Offer to move
+        // those onto the other (correct) entry instead of losing them.
+        setMergeError('');
+        setKeepNumber(data.duplicates?.[0]?.admissionNumber || '');
+        setDeleteBlock({ studentId, studentName, error: data.error, links: data.links, duplicates: data.duplicates || [] });
+      } else {
+        setError(data?.error || 'Could not delete this student. Please try again.');
+      }
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function submitMerge(e) {
+    e.preventDefault();
+    if (!deleteBlock) return;
+    if (!keepNumber.trim()) {
+      setMergeError('Enter the admission number of the entry you want to KEEP.');
+      return;
+    }
+    setSavingId(deleteBlock.studentId);
+    setMergeError('');
+    try {
+      const { data } = await client.post(`/students/${deleteBlock.studentId}/merge-into`, { keepAdmissionNumber: keepNumber.trim() });
+      const bits = [];
+      for (const [label, v] of [['attendance', data.attendance], ['exam results', data.examResults], ['bus payments', data.busPayments]]) {
+        if (v && (v.moved || v.dropped)) bits.push(`${label}: ${v.moved} moved${v.dropped ? `, ${v.dropped} already on the kept entry` : ''}`);
+      }
+      setBulkMessage(`${deleteBlock.studentName} was merged into ${data.kept.admissionNumber} and deleted.${bits.length ? ' ' + bits.join('; ') + '.' : ''}`);
+      setDeleteBlock(null);
+      loadStudents(filters);
+    } catch (err) {
+      setMergeError(err.response?.data?.error || 'Could not merge these entries.');
     } finally {
       setSavingId(null);
     }
@@ -928,6 +966,71 @@ export default function Students() {
                 className="text-sm px-4 py-2 rounded-md bg-present text-white hover:opacity-90 disabled:opacity-50"
               >
                 Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {deleteBlock && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <form
+            onSubmit={submitMerge}
+            className="bg-white border border-ink/10 rounded-lg p-6 w-full max-w-md"
+          >
+            <h3 className="text-sm font-medium text-ink mb-1">{deleteBlock.studentName} cannot be deleted directly</h3>
+            <p className="text-xs text-slate2 mb-3">{deleteBlock.error}</p>
+            <p className="text-xs text-slate2 mb-4">
+              If this is a duplicate entry of the same student, you can move these records onto the correct
+              entry and then delete this one. Where both entries already have a record for the same day, exam
+              subject or month, the entry you keep wins.
+            </p>
+
+            {deleteBlock.duplicates.length > 0 ? (
+              <div className="mb-3">
+                <p className="text-xs text-slate2 mb-1">Same-name entries found:</p>
+                <div className="space-y-1">
+                  {deleteBlock.duplicates.map((d) => (
+                    <button
+                      type="button"
+                      key={d.id}
+                      onClick={() => setKeepNumber(d.admissionNumber)}
+                      className={`w-full text-left text-sm border rounded-md px-3 py-2 ${
+                        keepNumber === d.admissionNumber ? 'border-ink bg-paper' : 'border-ink/20 hover:bg-paper'
+                      }`}
+                    >
+                      <span className="font-mono text-xs">{d.admissionNumber}</span> · {d.name} · {d.className} {d.section}
+                      <span className="block text-xs text-slate2">Father: {d.guardianName}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-late mb-3">No other entry with the same name was found. Type the admission number of the entry to keep.</p>
+            )}
+
+            <Field
+              label="Admission number of the entry to KEEP"
+              value={keepNumber}
+              onChange={setKeepNumber}
+              required
+            />
+            {mergeError && <p className="text-absent text-sm mt-2">{mergeError}</p>}
+
+            <div className="flex gap-2 justify-end mt-5">
+              <button
+                type="button"
+                onClick={() => setDeleteBlock(null)}
+                className="text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingId === deleteBlock.studentId}
+                className="text-sm px-4 py-2 rounded-md bg-absent text-white hover:opacity-90 disabled:opacity-50"
+              >
+                Move records and delete this entry
               </button>
             </div>
           </form>
