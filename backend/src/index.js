@@ -17,6 +17,7 @@ const meRoutes = require('./routes/me');
 const timetableRoutes = require('./routes/timetable');
 const timetableArrangementRoutes = require('./routes/timetableArrangements');
 const { syncSuspensions, syncIfDue } = require('./utils/suspensions');
+const instituteRoutes = require('./routes/institute');
 
 const app = express();
 
@@ -25,7 +26,8 @@ const app = express();
 // producing an array with one blank entry that matches nothing.
 const rawOrigins = (process.env.CORS_ORIGIN || '').split(',').map((o) => o.trim()).filter(Boolean);
 app.use(cors({ origin: rawOrigins.length ? rawOrigins : '*' }));
-app.use(express.json());
+// 6 MB: the Institute Data module uploads small images / one PDF as JSON
+app.use(express.json({ limit: '6mb' }));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
@@ -49,6 +51,7 @@ app.use('/api/staff-access', staffAccessRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/timetable/arrangements', timetableArrangementRoutes);
 app.use('/api/timetable', timetableRoutes);
+app.use('/api/institute', instituteRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
