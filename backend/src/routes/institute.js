@@ -75,6 +75,7 @@ function shape(inst) {
   out.establishedYear = inst.establishedYear ?? '';
   out.smcExists = inst.smcExists;
   out.smcFunctional = inst.smcFunctional;
+  out.smcBankAccount = inst.smcBankAccount;
   return out;
 }
 
@@ -83,19 +84,27 @@ router.get(
   '/',
   canEdit,
   asyncHandler(async (req, res) => {
-    const [inst, members, files] = await Promise.all([
+    const [inst, members, meetings, files] = await Promise.all([
       prisma.institute.findUnique({ where: { id: 1 } }),
       prisma.instituteCommitteeMember.findMany({ orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }),
+      prisma.instituteMeeting.findMany({ orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }),
       fileMeta(),
     ]);
     if (!inst) {
       // nothing saved yet: offer the values from the FEMIS record to review and save
-      return res.json({ saved: false, fields: DEFAULTS.fields, members: DEFAULTS.members, files });
+      return res.json({ saved: false, fields: DEFAULTS.fields, members: DEFAULTS.members, meetings: DEFAULTS.meetings, files });
     }
     res.json({
       saved: true,
       fields: shape(inst),
       members: members.map((m) => ({ memberType: m.memberType, name: m.name, contact: m.contact, gender: m.gender })),
+      meetings: meetings.map((m) => ({
+        meetingType: m.meetingType,
+        meetingDate: m.meetingDate,
+        meetingTime: m.meetingTime,
+        venue: m.venue,
+        minutesIssued: m.minutesIssued,
+      })),
       files,
     });
   })
@@ -132,6 +141,7 @@ router.put(
   asyncHandler(async (req, res) => {
     const f = req.body.fields || {};
     const members = Array.isArray(req.body.members) ? req.body.members : [];
+    const meetings = Array.isArray(req.body.meetings) ? req.body.meetings : [];
 
     const text = (k) => String(f[k] ?? '').trim();
     const missing = Object.entries(REQUIRED).filter(([k]) => !text(k)).map(([, label]) => label);
@@ -173,6 +183,27 @@ router.put(
       return res.status(400).json({ error: 'Add at least one committee member, or set the committee status to No.' });
     }
 
+    const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+    const cleanMeetings = [];
+    for (let i = 0; i < meetings.length; i += 1) {
+      const m = meetings[i] || {};
+      const row = {
+        meetingType: String(m.meetingType || '').trim(),
+        meetingDate: String(m.meetingDate || '').trim(),
+        meetingTime: String(m.meetingTime || '').trim(),
+        venue: String(m.venue || '').trim(),
+        minutesIssued: m.minutesIssued === true,
+        sortOrder: i,
+      };
+      if (!row.meetingType || !row.meetingDate || !row.meetingTime || !row.venue) {
+        return res.status(400).json({ error: `Meeting record ${i + 1}: meeting type, date, time and venue are all required.` });
+      }
+      if (!DATE_RE.test(row.meetingDate) || !TIME_RE.test(row.meetingTime)) {
+        return res.status(400).json({ error: `Meeting record ${i + 1}: enter a valid date and time.` });
+      }
+      cleanMeetings.push(row);
+    }
+
     const data = {};
     for (const k of TEXT_FIELDS) {
       const v = text(k);
@@ -183,11 +214,14 @@ router.put(
     data.establishedYear = year.value === null ? null : Math.round(year.value);
     data.smcExists = smcExists;
     data.smcFunctional = smcFunctional;
+    data.smcBankAccount = f.smcBankAccount === true;
 
     await prisma.$transaction([
       prisma.institute.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } }),
       prisma.instituteCommitteeMember.deleteMany({}),
       ...(cleanMembers.length ? [prisma.instituteCommitteeMember.createMany({ data: cleanMembers })] : []),
+      prisma.instituteMeeting.deleteMany({}),
+      ...(cleanMeetings.length ? [prisma.instituteMeeting.createMany({ data: cleanMeetings })] : []),
     ]);
     res.json({ saved: true });
   })
