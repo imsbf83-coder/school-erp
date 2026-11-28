@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import client from '../../api/client';
-import { SCHOOL_INFO } from '../../config/schoolInfo';
+import { useSchoolInfo } from '../../context/useSchoolInfo';
 import printElement from './printElement';
 
 // [1,2,3,5] -> "1-3,5"  (1 = Monday ... 5 = Friday)
@@ -43,6 +43,7 @@ function formatCell(items) {
 }
 
 export default function TeacherwiseGrid({ year, onYearChange }) {
+  const SCHOOL_INFO = useSchoolInfo(); // school name from Institute Data
   const [schedules, setSchedules] = useState([]);
   const [classes, setClasses] = useState([]);
   const [entries, setEntries] = useState([]);

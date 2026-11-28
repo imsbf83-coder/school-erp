@@ -1,4 +1,3 @@
-import { SCHOOL_INFO } from '../../config/schoolInfo';
 import { classSection, fmtDate, fmtTime, weekdayName } from './arrangementUtils';
 
 // WhatsApp text for the arrangement of one date. *bold* and _italic_ are
@@ -11,10 +10,10 @@ function leaveText(a, teacherName) {
 }
 
 // One message for the whole staff group.
-export function groupMessage({ day, date, teacherName, classById }) {
+export function groupMessage({ day, date, teacherName, classById, schoolName }) {
   const lines = [];
   lines.push(`*ARRANGEMENT - ${weekdayName(date)}, ${fmtDate(date)}*`);
-  lines.push(`_${SCHOOL_INFO.name}_`);
+  lines.push(`_${schoolName}_`);
   lines.push('');
   lines.push(`*On leave:* ${day.absences.map((a) => leaveText(a, teacherName)).join('; ')}`);
   lines.push('');
@@ -53,7 +52,7 @@ export function teacherSchedules({ day, teacherName, classById }) {
 }
 
 // A private message for one teacher.
-export function teacherMessage({ teacherId, items, date, teacherName, classById }) {
+export function teacherMessage({ teacherId, items, date, teacherName, classById, schoolName }) {
   const lines = [];
   lines.push(`Assalam o Alaikum ${teacherName(teacherId)},`);
   lines.push('');
@@ -65,7 +64,7 @@ export function teacherMessage({ teacherId, items, date, teacherName, classById 
   }
   lines.push('');
   lines.push(`Total: ${items.length} period${items.length > 1 ? 's' : ''}. Please be on time.`);
-  lines.push(`_${SCHOOL_INFO.name}_`);
+  lines.push(`_${schoolName}_`);
   return lines.join('\n');
 }
 

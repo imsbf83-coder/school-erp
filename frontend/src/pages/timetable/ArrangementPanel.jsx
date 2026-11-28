@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import client from '../../api/client';
-import { SCHOOL_INFO } from '../../config/schoolInfo';
+import { useSchoolInfo } from '../../context/useSchoolInfo';
 import printElement from './printElement';
 import { classSection, fmtDate, fmtTime, shiftDate, todayString, weekdayName } from './arrangementUtils';
 import { groupMessage, teacherMessage, teacherSchedules, whatsappLink } from './arrangementMessages';
@@ -8,6 +8,7 @@ import { groupMessage, teacherMessage, teacherSchedules, whatsappLink } from './
 // Daily arrangements: mark teachers on leave (whole day or some periods), see
 // the periods that need cover, pick a free teacher for each, print the sheet.
 export default function ArrangementPanel({ year }) {
+  const SCHOOL_INFO = useSchoolInfo(); // school name from Institute Data
   const [date, setDate] = useState(todayString());
   const [day, setDay] = useState(null);
   const [teachers, setTeachers] = useState([]);
@@ -135,7 +136,7 @@ export default function ArrangementPanel({ year }) {
   }
 
   // ---------- WhatsApp ----------
-  const ctx = { day, date, teacherName, classById };
+  const ctx = { day, date, teacherName, classById, schoolName: SCHOOL_INFO.name };
   const schedules = day ? teacherSchedules(ctx) : [];
   const phoneOf = (id) => contacts[id]?.phone || '';
 

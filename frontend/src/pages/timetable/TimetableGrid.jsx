@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import client from '../../api/client';
-import { SCHOOL_INFO } from '../../config/schoolInfo';
+import { useSchoolInfo } from '../../context/useSchoolInfo';
 import printElement from './printElement';
 
 const DAYS = [
@@ -43,6 +43,7 @@ function sectionLabel(cls, section) {
 }
 
 export default function TimetableGrid({ canEdit, year, onYearChange }) {
+  const SCHOOL_INFO = useSchoolInfo(); // school name from Institute Data
   const [schedules, setSchedules] = useState([]);
   const [classes, setClasses] = useState([]);
   const [entries, setEntries] = useState([]);

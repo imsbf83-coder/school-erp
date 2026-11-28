@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import client from '../../api/client';
-import { SCHOOL_INFO } from '../../config/schoolInfo';
+import { useSchoolInfo } from '../../context/useSchoolInfo';
 import printElement from './printElement';
 import { classSection, fmtDate, monthName, thisMonthString, weekdayName } from './arrangementUtils';
 
 // Monthly report: who was on leave, who covered which periods, and how many
 // arrangements each teacher took.
 export default function ArrangementReport() {
+  const SCHOOL_INFO = useSchoolInfo(); // school name from Institute Data
   const [month, setMonth] = useState(thisMonthString());
   const [data, setData] = useState(null);
   const [teachers, setTeachers] = useState([]);
