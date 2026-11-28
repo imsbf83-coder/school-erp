@@ -932,10 +932,23 @@ model Institute {
   webUrl String?
 
   // ---- School / college management committee ----
-  smcExists     Boolean @default(true)
-  smcFunctional Boolean @default(true)
+  smcExists       Boolean @default(true)
+  smcFunctional   Boolean @default(true)
+  smcBankAccount  Boolean @default(false)
 
   updatedAt DateTime @updatedAt
+}
+
+// One meeting of the school management committee (SMC/CMC meeting records).
+// meetingDate is "YYYY-MM-DD", meetingTime is 24-hour "HH:MM".
+model InstituteMeeting {
+  id           Int     @id @default(autoincrement())
+  meetingType  String
+  meetingDate  String
+  meetingTime  String
+  venue        String
+  minutesIssued Boolean @default(false)
+  sortOrder    Int     @default(0)
 }
 
 model InstituteCommitteeMember {
