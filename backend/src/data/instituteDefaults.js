@@ -26,7 +26,7 @@ module.exports = {
     hoiBps: 'BPS-19',
     principalPhoneRes: '',
     principalMobile: '03335300883',
-    hoiPostingDate: '2023-01-04',
+    hoiPostingDate: '2023-04-01', // FEMIS shows 04/01/2023 (month/day/year)
     postingCategory: 'Permanent',
     phone1: '0519261678',
     phone2: '0519261678',
@@ -35,6 +35,7 @@ module.exports = {
     webUrl: '',
     smcExists: true,
     smcFunctional: true,
+    smcBankAccount: false,
   },
   members: [
     { memberType: 'Chairman', name: 'DR EHSAN MEHMOOD', contact: '03335300883', gender: 'Male' },
@@ -43,5 +44,8 @@ module.exports = {
     { memberType: 'Member Technical', name: 'MUHAMMAD FAROOQ NOOR', contact: '03014356277', gender: 'Male' },
     { memberType: 'Member', name: 'ANSAR GHAFOOR', contact: '03455851988', gender: 'Male' },
     { memberType: 'Finance Secretary', name: 'MUHAMMAD HANIF', contact: '0345525379', gender: 'Male' },
+  ],
+  meetings: [
+    { meetingType: 'Annual Planning Meeting', meetingDate: '2026-07-16', meetingTime: '09:00', venue: 'IMSB F-8/3', minutesIssued: false },
   ],
 };
