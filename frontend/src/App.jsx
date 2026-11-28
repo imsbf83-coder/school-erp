@@ -12,6 +12,7 @@ import BusReports from './pages/BusReports';
 import TransportExpenses from './pages/TransportExpenses';
 import Reports from './pages/Reports';
 import Timetable from './pages/Timetable';
+import Institute from './pages/Institute';
 import ProtectedRoute from './components/ProtectedRoute';
 
 export default function App() {
@@ -34,7 +35,11 @@ export default function App() {
       <Route path="/bus-fees" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusFees /></ProtectedRoute>} />
       <Route path="/bus-reports" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT', 'STAFF']} moduleKey="BUS"><BusReports /></ProtectedRoute>} />
       <Route path="/transport-expenses" element={<ProtectedRoute roles={['ADMIN', 'ACCOUNTANT']} moduleKey="BUS"><TransportExpenses /></ProtectedRoute>} />
-      <Route path="/timetable" element={<ProtectedRoute roles={['ADMIN']} moduleKey="TIMETABLE"><Timetable /></ProtectedRoute>} />
+      {/* Anyone logged in can view the timetable; editing is limited to ADMIN and
+          users granted the TIMETABLE module (enforced by the API and by Timetable.jsx). */}
+      <Route path="/timetable" element={<ProtectedRoute><Timetable /></ProtectedRoute>} />
+      {/* Institute Data: ADMIN, or anyone granted the INSTITUTE_DATA module. */}
+      <Route path="/institute" element={<ProtectedRoute roles={['ADMIN']} moduleKey="INSTITUTE_DATA"><Institute /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     </Routes>
   );
