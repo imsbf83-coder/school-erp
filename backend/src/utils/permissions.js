@@ -16,6 +16,7 @@ const MODULES = {
   GRADE_SCALES: 'GRADE_SCALES',
   HOLIDAYS: 'HOLIDAYS',
   TIMETABLE: 'TIMETABLE',
+  INSTITUTE_DATA: 'INSTITUTE_DATA',
 };
 
 // Suggested starting permission sets for the two named "incharge" roles,
