@@ -886,3 +886,75 @@ model StudentSuspension {
   @@index([studentId])
   @@index([startDate, endDate])
 }
+
+// ---------- INSTITUTE DATA ----------
+
+// The school's own profile, as on the FEMIS school record: one row only
+// (id = 1). Dates are plain "YYYY-MM-DD" text.
+model Institute {
+  id Int @id
+
+  // ---- Basic information ----
+  status               String
+  name                 String
+  shortName            String
+  emisCode             String
+  nisNumber            String?
+  institutionType      String
+  educationSector      String
+  addressType          String
+  sector               String
+  address              String?
+  latitude             Float?
+  longitude            Float?
+  establishedYear      Int?
+  designatedFor        String
+  academicLevel        String
+  academicLevelClasses String
+  medium               String
+  workingShift         String
+  buildingOwnership    String
+
+  // ---- Contact information ----
+  // administrator (head of institution)
+  hoiName String
+  hoiBps  String
+  // principal
+  principalPhoneRes String?
+  principalMobile   String
+  hoiPostingDate    String
+  postingCategory   String
+  // institute
+  phone1 String
+  phone2 String
+  fax    String?
+  email  String
+  webUrl String?
+
+  // ---- School / college management committee ----
+  smcExists     Boolean @default(true)
+  smcFunctional Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+}
+
+model InstituteCommitteeMember {
+  id         Int    @id @default(autoincrement())
+  memberType String
+  name       String
+  contact    String
+  gender     String
+  sortOrder  Int    @default(0)
+}
+
+// Uploaded files: kind is "logo", "signature" (principal) or "ownership"
+// (building ownership document). dataUrl is the whole file as a data: URL.
+model InstituteFile {
+  id        Int      @id @default(autoincrement())
+  kind      String   @unique
+  fileName  String
+  mimeType  String
+  dataUrl   String
+  size      Int
+  updatedAt DateTime @updatedAt
+}
