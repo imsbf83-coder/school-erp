@@ -24,6 +24,7 @@ const OPTIONS = {
   buildingOwnership: ['Govt Building', 'Rented Building', 'Donated Building', 'Others'],
   hoiBps: BPS,
   postingCategory: ['Permanent', 'Acting Charge', 'Temporary'],
+  meetingType: ['Annual Planning Meeting', 'Quarterly Meeting', 'Monthly Meeting', 'Budget Meeting', 'Emergency Meeting', 'Other'],
   memberType: ['Chairman', 'Vice Chairman', 'President', 'Secretary', 'Member', 'Member Technical', 'Finance Secretary'],
   gender: ['Male', 'Female'],
 };
@@ -82,6 +83,7 @@ const CONTACT_GROUPS = [
 ];
 
 const EMPTY_MEMBER = { memberType: '', name: '', contact: '', gender: 'Male' };
+const EMPTY_MEETING = { meetingType: '', meetingDate: '', meetingTime: '', venue: '', minutesIssued: false };
 
 function Field({ f, value, onChange }) {
   const listId = OPTIONS[f.key] ? `inst-${f.key}` : undefined;
@@ -218,6 +220,7 @@ export default function Institute() {
   const school = useSchoolInfo(); // current logo / signature previews
   const [fields, setFields] = useState(null);
   const [members, setMembers] = useState([]);
+  const [meetings, setMeetings] = useState([]);
   const [files, setFiles] = useState({});
   const [saved, setSaved] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -233,6 +236,7 @@ export default function Institute() {
         const { data } = await client.get('/institute');
         setFields(data.fields);
         setMembers(data.members);
+        setMeetings(data.meetings || []);
         setFiles(data.files || {});
         setSaved(data.saved);
       } catch (err) {
@@ -245,6 +249,7 @@ export default function Institute() {
 
   const set = (key) => (value) => setFields((f) => ({ ...f, [key]: value }));
   const setMember = (i, patch) => setMembers((list) => list.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+  const setMeeting = (i, patch) => setMeetings((list) => list.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
 
   async function handleSave(e) {
     e.preventDefault();
@@ -252,7 +257,7 @@ export default function Institute() {
     setError('');
     setNotice('');
     try {
-      await client.put('/institute', { fields, members });
+      await client.put('/institute', { fields, members, meetings });
       setSaved(true);
       setNotice('Institute data saved.');
       await refreshInstitute();
@@ -420,6 +425,59 @@ export default function Institute() {
         <button type="button" onClick={() => setMembers((list) => [...list, { ...EMPTY_MEMBER }])} className="mt-3 text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-paper">
           + Add member
         </button>
+
+        <div className="mt-8 pt-5 border-t border-ink/10">
+          <h3 className="font-medium text-ink mb-3">Bank Account Details</h3>
+          <YesNo label="SMC / CMC Bank Account Available?" value={fields.smcBankAccount} onChange={set('smcBankAccount')} />
+        </div>
+
+        <div className="mt-8 pt-5 border-t border-ink/10">
+          <h3 className="font-medium text-ink mb-3">SMC / CMC Meeting Records</h3>
+          <datalist id="inst-meetingType">{OPTIONS.meetingType.map((o) => <option key={o} value={o} />)}</datalist>
+          {meetings.length === 0 && <p className="text-sm text-slate2 mb-3">No meetings recorded.</p>}
+          <div className="space-y-3">
+            {meetings.map((m, i) => (
+              <div key={i} className="border border-ink/10 rounded-md p-3 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-3">
+                  <label className="block text-xs text-slate2 mb-1">Meeting type <span className="text-absent">*</span></label>
+                  <input list="inst-meetingType" value={m.meetingType} onChange={(e) => setMeeting(i, { meetingType: e.target.value })} className="w-full border border-ink/20 rounded-md px-2 py-2 bg-white text-sm" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate2 mb-1">Meeting date <span className="text-absent">*</span></label>
+                  <input type="date" value={m.meetingDate} onChange={(e) => setMeeting(i, { meetingDate: e.target.value })} className="w-full border border-ink/20 rounded-md px-2 py-2 bg-white text-sm" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate2 mb-1">Time <span className="text-absent">*</span></label>
+                  <input type="time" value={m.meetingTime} onChange={(e) => setMeeting(i, { meetingTime: e.target.value })} className="w-full border border-ink/20 rounded-md px-2 py-2 bg-white text-sm" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate2 mb-1">Venue <span className="text-absent">*</span></label>
+                  <input value={m.venue} onChange={(e) => setMeeting(i, { venue: e.target.value })} className="w-full border border-ink/20 rounded-md px-2 py-2 bg-white text-sm" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate2 mb-1">Minutes issued <span className="text-absent">*</span></label>
+                  <select value={m.minutesIssued ? 'yes' : 'no'} onChange={(e) => setMeeting(i, { minutesIssued: e.target.value === 'yes' })} className="w-full border border-ink/20 rounded-md px-2 py-2 bg-white text-sm">
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-1 flex sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setMeetings((list) => list.filter((_, idx) => idx !== i))}
+                    aria-label="Remove meeting"
+                    className="px-3 py-2 text-sm border border-ink/20 rounded-md text-absent hover:bg-paper"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => setMeetings((list) => [...list, { ...EMPTY_MEETING }])} className="mt-3 text-sm px-4 py-2 rounded-md border border-ink/20 hover:bg-paper">
+            + Add meeting
+          </button>
+        </div>
       </Section>
 
       {/* extra: used on printouts */}
@@ -491,6 +549,33 @@ export default function Institute() {
                 <td className="border border-ink/30 px-2 py-1">{m.name}</td>
                 <td className="border border-ink/30 px-2 py-1">{m.contact}</td>
                 <td className="border border-ink/30 px-2 py-1">{m.gender}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="font-semibold mt-3 mb-1">
+          Bank Account Details · SMC / CMC bank account available: {fields.smcBankAccount ? 'Yes' : 'No'}
+        </p>
+        <p className="font-semibold mt-3 mb-1">SMC / CMC Meeting Records</p>
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr>
+              {['Meeting type', 'Date', 'Time', 'Venue', 'Minutes issued'].map((h) => (
+                <th key={h} className="border border-ink/30 px-2 py-1 text-left">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {meetings.length === 0 && (
+              <tr><td className="border border-ink/30 px-2 py-1" colSpan={5}>No meetings recorded.</td></tr>
+            )}
+            {meetings.map((m, i) => (
+              <tr key={i}>
+                <td className="border border-ink/30 px-2 py-1">{m.meetingType}</td>
+                <td className="border border-ink/30 px-2 py-1">{dateDisplay(m.meetingDate)}</td>
+                <td className="border border-ink/30 px-2 py-1">{m.meetingTime}</td>
+                <td className="border border-ink/30 px-2 py-1">{m.venue}</td>
+                <td className="border border-ink/30 px-2 py-1">{m.minutesIssued ? 'Yes' : 'No'}</td>
               </tr>
             ))}
           </tbody>
