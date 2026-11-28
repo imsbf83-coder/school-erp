@@ -24,7 +24,8 @@ const modules = [
   { to: '/staff', label: 'Staff', accent: '#2E6E8E', moduleKey: 'STAFF' },
   { to: '/bus-fees', label: 'Bus Fee Collection', accent: '#C0632E', moduleKey: 'BUS' },
   { to: '/transport-expenses', label: 'Transport Expenses', accent: '#8A5A2E', moduleKey: 'BUS' },
-  { to: '/timetable', label: 'Timetable', accent: '#3E7C7B', moduleKey: 'TIMETABLE' },
+  { to: '/timetable', label: 'Timetable', accent: '#3E7C7B', moduleKey: null },
+  { to: '/institute', label: 'Institute Data', accent: '#6B5B95', moduleKey: 'INSTITUTE_DATA' },
   { to: '/reports', label: 'Reports', accent: '#5B6B7C', moduleKey: null },
 ];
 
@@ -170,7 +171,7 @@ export default function Layout({ children }) {
 
       {/* pt-14 on mobile makes room for the fixed top bar; md+ drops it
           since the top bar itself is hidden there. */}
-      <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden pt-14 md:pt-0">
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
         <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-10">{children}</div>
       </main>
     </div>
